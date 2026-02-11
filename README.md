@@ -114,6 +114,19 @@ python -m pytest tests/ -v
 
 ---
 
+## 📚 Documentation
+
+Detailed scientific and technical documentation is available in the `docs/` directory:
+
+| Document | Description |
+| :--- | :--- |
+| 📘 **[Physics Model](docs/PHYSICS_MODEL.md)** | Full mathematical derivation of the Surface Energy Balance, Crank-Nicolson discretization, and Raytracing algorithms. |
+| ⚙️ **[Configuration Guide](docs/CONFIGURATION.md)** | Comprehensive guide to `default_config.yaml` parameters, valid ranges, and physical implications. |
+| ⚠️ **[Assumptions & Limitations](docs/ASSUMPTIONS_AND_LIMITATIONS.md)** | Registry of all physical assumptions, known limitations (e.g., lack of multi-bounce IR), and their impact. |
+| 🔌 **[API Reference](docs/API_REFERENCE.md)** | Developer documentation for `SimulationRunner`, `CrankNicolsonSolver`, and other core modules. |
+
+---
+
 ## Architecture
 
 ```
