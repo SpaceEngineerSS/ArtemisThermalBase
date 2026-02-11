@@ -1,0 +1,172 @@
+# ==============================================================================
+# ArtemisThermalBase — Default Simulation Configuration
+# ==============================================================================
+# Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
+#
+# ALL physical constants and parameters are defined here.
+# Nothing is hardcoded in Python source files.
+# Researchers can modify any value and re-run without touching code.
+# ==============================================================================
+
+# --- Simulation Metadata ---
+metadata:
+  project_name: "ArtemisThermalBase"
+  version: "0.1.0"
+  author: "Mehmet Gümüş"
+  description: >
+    Lunar South Pole micro-illumination and thermal equilibrium simulation.
+    Validated against LRO Diviner observations (Paige et al., 2010).
+
+# --- Target Region ---
+target:
+  name: "Shackleton Crater"
+  latitude_deg: -89.54        # [deg] Zuber et al., 2012
+  longitude_deg: 129.78       # [deg] Zuber et al., 2012
+  diameter_km: 21.0           # [km] Approximate crater diameter
+  depth_km: 4.2               # [km] Approximate rim-to-floor depth
+
+# --- Fundamental Physical Constants ---
+# Source: CODATA 2018, IAU 2012
+constants:
+  stefan_boltzmann: 5.670374419e-8   # [W/m²/K⁴] Stefan-Boltzmann constant
+  solar_constant: 1361.0             # [W/m²] Total Solar Irradiance at 1 AU (Kopp & Lean, 2011)
+  astronomical_unit: 1.495978707e11  # [m] 1 AU (IAU 2012)
+  speed_of_light: 2.99792458e8      # [m/s]
+
+# --- Lunar Parameters ---
+lunar:
+  radius_m: 1737400.0               # [m] Mean lunar radius (IAU)
+  sidereal_period_s: 2360591.5104    # [s] 27.321661 days
+  synodic_period_s: 2551442.9       # [s] 29.530589 days (one lunar day)
+  obliquity_deg: 1.5424              # [deg] Obliquity to ecliptic (Rambaux & Williams, 2011)
+  solar_angular_diameter_deg: 0.533  # [deg] Mean angular diameter of Sun from Moon
+
+# --- Surface Optical Properties ---
+# Source: Vasavada et al. (2012), Bandfield et al. (2015)
+surface:
+  bond_albedo: 0.12                  # [-] Bond albedo (normal ~0.15, Bond ~0.12)
+  thermal_emissivity: 0.95           # [-] Broadband thermal emissivity
+  reflectance_model: "lambertian"    # Options: "lambertian" (future: "hapke")
+
+# --- Regolith Thermophysical Properties ---
+# Source: Hayne et al. (2017), JGR Planets, 122, 2371-2400
+regolith:
+  # Density profile: ρ(z) = rho_deep - (rho_deep - rho_surface) * exp(-z / H)
+  density:
+    surface_kg_m3: 1100.0            # [kg/m³] Surface bulk density
+    deep_kg_m3: 1800.0               # [kg/m³] Deep bulk density
+    transition_depth_m: 0.06         # [m] e-folding depth H
+
+  # Thermal conductivity: k(T) = k_contact + k_radiative * T^3
+  conductivity:
+    # Top layer (0 to ~2 cm)
+    surface:
+      k_contact: 7.4e-4             # [W/m/K] Phonon conduction through grain contacts
+      k_radiative: 2.0e-11          # [W/m/K⁴] Radiative component coefficient
+    # Deep layer (below ~2 cm)
+    deep:
+      k_contact: 3.4e-3             # [W/m/K]
+      k_radiative: 1.0e-11          # [W/m/K⁴]
+    layer_boundary_m: 0.02           # [m] Depth where conductivity model transitions
+
+  # Specific heat capacity polynomial: c_p(T) [J/kg/K]
+  # c_p(T) = c0 + c1*T^0.5 + c2*T + c3*T^2 + c4*T^3
+  # Source: Hayne et al. (2017), valid for 80 < T < 400 K
+  specific_heat:
+    c0: -3.6125
+    c1: 2.7431                       # coefficient for T^0.5
+    c2: 2.3616e-3                    # coefficient for T
+    c3: -1.2340e-5                   # coefficient for T^2
+    c4: 8.9093e-9                    # coefficient for T^3
+    minimum_value: 8.0               # [J/kg/K] Clamping floor to avoid singularity at T→0
+
+  # Geothermal heat flux
+  # Source: Langseth et al. (1976), Apollo 15/17 measurements
+  # ASSUMPTION: Equatorial measurement applied to south pole
+  geothermal_flux: 0.018             # [W/m²]
+
+# --- Solver Configuration ---
+solver:
+  thermal:
+    method: "crank_nicolson"         # Options: "crank_nicolson", "implicit_euler"
+    # Vertical grid (non-uniform geometric spacing)
+    grid:
+      dz_surface_m: 5.0e-4          # [m] Finest grid spacing at surface (0.5 mm)
+      growth_ratio: 1.07             # [-] Geometric growth factor
+      num_layers: 100                # Number of subsurface layers
+    # Time stepping
+    time:
+      dt_s: 120.0                    # [s] Default time step (2 minutes)
+      max_dt_s: 3600.0               # [s] Maximum allowed time step
+    # Newton iteration for nonlinear surface BC
+    newton:
+      max_iterations: 20
+      tolerance_K: 1.0e-4            # [K] Convergence tolerance
+      relaxation: 1.0                # Under-relaxation factor (1.0 = no relaxation)
+    # Initial condition
+    initial_temperature_K: 200.0     # [K] Uniform initial temperature guess
+
+  raytracer:
+    # BVH configuration
+    bvh:
+      max_leaf_triangles: 4          # Max triangles per BVH leaf node
+      sah_num_bins: 16               # Number of bins for SAH sweep
+    # Intersection
+    epsilon: 1.0e-10                 # [-] Zero-test epsilon for Möller-Trumbore
+    precision: "float64"             # Options: "float32", "float64"
+
+  illumination:
+    # Solar disk sampling
+    solar_disk_samples: 64           # Number of sample points on solar disk
+    sampling_method: "fibonacci"     # Options: "fibonacci", "concentric", "random"
+    # Point-source mode for fast previews
+    point_source_mode: false
+
+# --- Synthetic DEM Configuration (Milestone 1) ---
+synthetic_dem:
+  type: "parabolic_bowl"             # Options: "parabolic_bowl", "conical", "flat"
+  radius_m: 10500.0                  # [m] Crater radius (~21 km diameter)
+  depth_m: 4200.0                    # [m] Crater depth
+  rim_height_m: 300.0                # [m] Raised rim above surrounding terrain
+  grid_resolution_m: 20.0            # [m/pixel] DEM resolution
+  domain_padding_m: 3000.0           # [m] Flat terrain padding around crater rim
+  # Random seed for any stochastic terrain features
+  seed: 42
+
+# --- Simulation Time Range ---
+time_range:
+  # For Milestone 1: short test run
+  start: "2025-01-01T00:00:00"       # ISO 8601 UTC
+  end: "2025-01-30T00:00:00"         # ~1 synodic month
+  output_interval_s: 3600.0          # [s] Save output every hour
+
+# --- Output Configuration ---
+output:
+  directory: "results/"
+  formats:
+    illumination_map: "npy"          # Options: "npy", "geotiff", "netcdf"
+    thermal_map: "npy"
+    time_series: "csv"
+  save_subsurface_profiles: true     # Save full depth profiles (large files)
+  compress: true                     # Use compression for output files
+
+# --- Visualization ---
+visualization:
+  colormap: "inferno"                # Matplotlib colormap for thermal maps
+  illumination_colormap: "gray"      # Colormap for illumination fraction
+  dpi: 150                           # Figure resolution
+  interactive: false                 # Use Plotly instead of Matplotlib
+
+# --- Logging & Telemetry ---
+logging:
+  level: "INFO"                      # Options: "DEBUG", "INFO", "WARNING", "ERROR"
+  file: "artemis.log"
+  show_progress_bar: true
+  profile_memory: false              # Enable memory profiling (slow)
+
+# --- Reproducibility ---
+reproducibility:
+  random_seed: 42
+  float_precision: "float64"
+  log_platform_info: true            # Log OS, CPU, NumPy version, etc.
+  hash_outputs: true                 # SHA-256 hash of output arrays

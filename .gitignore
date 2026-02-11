@@ -1,0 +1,72 @@
+# ==============================================================================
+# ArtemisThermalBase — .gitignore
+# ==============================================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Data files (large binaries, not for git) ---
+data/*.tif
+data/*.TIF
+data/*.bsp
+data/*.BSP
+data/*.npy
+data/*.npz
+data/_download_tmp.*
+
+# --- Simulation output ---
+output/
+output_*/
+results/
+*.npy
+*.npz
+
+# --- Images (except hero in root-level docs) ---
+*.png
+!docs/*.png
+
+# --- Logs ---
+*.log
+
+# --- Numba / JIT cache ---
+numba_cache/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Coverage ---
+htmlcov/
+.coverage
+.coverage.*
+
+# --- mypy ---
+.mypy_cache/
+
+# --- pytest ---
+.pytest_cache/

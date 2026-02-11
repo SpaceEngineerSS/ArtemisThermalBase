@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.backends"
+
+[project]
+name = "artemis-thermal-base"
+version = "0.1.0"
+description = "Research-grade Lunar South Pole micro-illumination & thermal raytracer"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Mehmet Gümüş", email = "spacegumus@gmail.com" },
+]
+keywords = [
+    "lunar",
+    "thermal",
+    "raytracing",
+    "illumination",
+    "south-pole",
+    "artemis",
+    "planetary-science",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.26.0",
+    "numba>=0.59.0",
+    "scipy>=1.12.0",
+    "matplotlib>=3.8.0",
+    "plotly>=5.18.0",
+    "pyyaml>=6.0.1",
+    "rasterio>=1.3.9",
+    "skyfield>=1.48",
+    "tqdm>=4.66.0",
+    "xarray>=2024.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.8.0",
+    "ruff>=0.2.0",
+]
+viz = [
+    "plotly>=5.18.0",
+    "kaleido>=0.2.1",
+]
+
+[project.scripts]
+artemis = "simulation.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
+Repository = "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
+Documentation = "https://github.com/SpaceEngineerSS/ArtemisThermalBase/tree/main/docs"
+Issues = "https://github.com/SpaceEngineerSS/ArtemisThermalBase/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks integration tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "D", "UP", "S", "B"]
+ignore = ["D100", "D104", "S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
