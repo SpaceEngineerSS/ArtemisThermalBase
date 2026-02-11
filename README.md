@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="output/hero_artemis.png" alt="ArtemisThermalBase — Lunar South Pole Thermal Simulation" width="800"/>
+  <img src="docs/hero_artemis.png" alt="ArtemisThermalBase — Lunar South Pole Thermal Simulation" width="800"/>
 </p>
 
 <h1 align="center">🌙 ArtemisThermalBase</h1>
