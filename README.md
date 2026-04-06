@@ -33,6 +33,9 @@
 | 🔬 **Temperature-Dependent Properties** | Regolith conductivity `k(T) = k_c + k_r·T³` and polynomial heat capacity following Hayne et al. (2017) |
 | 🚀 **GPU-Ready Architecture** | Numba JIT-compiled raytracer with SAH-optimized BVH (4-leaf max, 16 SAH bins) |
 | 📊 **Publication-Quality Output** | Automatic hero image generation with thermal-optical compositing, colorbars, and scale bars |
+| 🔭 **Hapke BRDF** | Angle-dependent reflectance replacing Lambertian albedo — backscattering, opposition surge, H-function (Hapke, 2012) |
+| 🏔️ **Bandfield Roughness** | Sub-pixel micro-roughness cavity self-heating → effective emissivity correction (Bandfield et al., 2015) |
+| 🖥️ **Mission Control GUI** | Streamlit + PyVista interactive dashboard with 3D terrain, ice stability maps, and rover power simulation |
 
 ---
 
@@ -112,6 +115,22 @@ python main.py --render-only --output output --hero-dpi 600
 python -m pytest tests/ -v
 ```
 
+### 🖥️ Launch Mission Control GUI
+
+```bash
+# Install GUI dependencies
+pip install -e ".[gui]"
+
+# Launch the interactive dashboard
+streamlit run gui/dashboard.py
+```
+
+The GUI provides:
+- **🌡️ Thermal Overview** — 3D terrain viewer (PyVista) + 2D temperature heatmap + probe time series
+- **🧊 Ice Stability** — Cold trap classification map (Powell & Rubanenko 2020)
+- **🤖 Rover Simulator** — Click-to-inspect landing sites with T_sink, sky view factor, solar power estimates
+- **📊 Physics Models** — Interactive Hapke A_DH curve and roughness ε_eff diagnostic plots
+
 ---
 
 ## 📚 Documentation
@@ -133,23 +152,29 @@ Detailed scientific and technical documentation is available in the `docs/` dire
 ArtemisThermalBase/
 ├── config/                     # YAML simulation parameters
 │   └── default_config.yaml     # All physical constants & solver settings
-├── core_engine/                # Raytracing, mesh, illumination
+├── core_engine/                # Raytracing, mesh, illumination, optics
 │   ├── raytracer.py            # BVH + Möller-Trumbore intersection
 │   ├── mesh.py                 # DEM → triangle mesh conversion
 │   ├── illumination.py         # Solar visibility + penumbra
+│   ├── reflectance.py          # Hapke (2012) BRDF model [NEW v0.3]
+│   ├── roughness.py            # Bandfield (2015) roughness [NEW v0.3]
+│   ├── view_factors.py         # Monte Carlo sparse view factors
 │   └── constants.py            # Config loader & dataclasses
 ├── data_ingestion/             # DEM loading, coordinates, ephemeris
 │   ├── synthetic_dem.py        # Parametric crater generator
 │   ├── lola_loader.py          # NASA LRO LOLA GeoTIFF loader
-│   ├── ephemeris.py            # Skyfield sun position
+│   ├── ephemeris.py            # Skyfield sun position + solar flux
 │   └── coordinate_utils.py    # Selenographic ↔ local transforms
 ├── thermal_solver/             # Heat equation solver
 │   ├── crank_nicolson.py       # CN implicit solver + Newton BC
 │   ├── regolith_properties.py  # Hayne et al. (2017) properties
+│   ├── volatiles.py            # Ice sublimation & cold trap stability
 │   └── grid.py                 # Geometric subsurface grid
 ├── simulation/                 # Orchestration
 │   ├── runner.py               # Main simulation loop
 │   └── io_manager.py           # NumPy data persistence
+├── gui/                        # Interactive dashboard [NEW v0.3]
+│   └── dashboard.py            # Streamlit Mission Control GUI
 ├── visualization/              # Output rendering
 │   ├── plotter.py              # Debug / analysis plots
 │   └── hero_renderer.py        # Cinematic composite renderer
@@ -189,7 +214,8 @@ ArtemisThermalBase/
 | 2 | Real NASA LRO LOLA data pipeline + `--dem` flag | ✅ Complete |
 | 3 | C++ BVH raytracer with pybind11 | ⬜ Planned |
 | 4 | Multi-bounce IR (sparse view factors) + volatile stability | ✅ Complete |
-| 5 | Diviner validation + Hapke reflectance | ⬜ Planned |
+| 5 | Hapke BRDF + Bandfield roughness + Streamlit GUI | ✅ Complete |
+| 6 | Diviner validation + publication pipeline | ⬜ Planned |
 
 ---
 
@@ -219,7 +245,7 @@ If you use ArtemisThermalBase in your research, please cite:
   title        = {ArtemisThermalBase: High-Fidelity Lunar South Pole Thermal Simulation},
   year         = {2026},
   url          = {https://github.com/SpaceEngineerSS/ArtemisThermalBase},
-  version      = {0.2.0}
+  version      = {0.3.0}
 }
 ```
 
@@ -235,6 +261,9 @@ If you use ArtemisThermalBase in your research, please cite:
 6. Möller, T. & Trumbore, B. (1997). "Fast, minimum storage ray-triangle intersection." *J. Graphics Tools*, 2(1), 21-28.
 7. Smith, D.E., et al. (2017). "Summary of the results from the Lunar Orbiter Laser Altimeter after seven years in lunar orbit." *Icarus*, 283, 70-91.
 8. Powell, T.M. & Rubanenko, L. (2020). "Cold trap stability and ice retention in the Moon's south polar region." *AGU Fall Meeting*.
+9. Hapke, B. (2012). *Theory of Reflectance and Emittance Spectroscopy*, 2nd ed. Cambridge University Press.
+10. Bandfield, J.L., et al. (2015). "Lunar surface roughness derived from LRO Diviner Radiometer observations." *Icarus*, 248, 357-372.
+11. Helfenstein, P. & Shepard, M.K. (2011). "Testing the Hapke photometric model." *Icarus*, 215, 83-100.
 
 ---
 

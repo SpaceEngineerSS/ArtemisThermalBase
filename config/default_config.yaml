@@ -151,6 +151,25 @@ volatiles:
     stable: 110.0                      # [K] Ice stable for > 1 Gyr (Powell & Rubanenko, 2020)
     marginal: 115.0                    # [K] Ice stable for ~100 Myr
 
+# --- Hapke BRDF (Milestone 5: Advanced Optics) ---
+# Bidirectional reflectance replacing Lambertian albedo
+# Source: Hapke (2012), Tables 12.1 & 12.2
+hapke:
+  enabled: true                        # Enable Hapke angle-dependent reflectance
+  single_scattering_albedo: 0.23       # [-] w for mature highland regolith
+  b: 0.21                             # [-] HG asymmetry (lobe width)
+  c: 0.70                             # [-] HG partition (backward fraction)
+  B_SH0: 1.0                          # [-] Opposition effect amplitude
+  h_s: 0.065                          # [rad] Opposition angular half-width
+
+# --- Sub-Pixel Roughness (Milestone 5: Bandfield Model) ---
+# Effective emissivity correction for micro-scale terrain
+# Source: Bandfield et al. (2015), Icarus 248, 357-372
+roughness:
+  enabled: true                        # Enable roughness correction
+  rms_slope_deg: 20.0                  # [deg] RMS slope of sub-pixel features
+  cavity_coefficient: 0.4             # [-] Empirical cavity coupling constant
+
 # --- Simulation Time Range ---
 time_range:
   # For Milestone 1: short test run

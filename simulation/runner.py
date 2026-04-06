@@ -286,6 +286,38 @@ class SimulationRunner:
         else:
             logger.info("View factors disabled by config.")
 
+        # Step 2.7: Precompute roughness correction (geometry-only)
+        roughness_emissivity = np.full(num_faces, self._emissivity)
+        hapke_enabled = getattr(self._config, 'hapke_enabled', True)
+        roughness_enabled = getattr(self._config, 'roughness_enabled', True)
+        rms_slope_deg = getattr(self._config, 'roughness_rms_slope_deg', 20.0)
+
+        if roughness_enabled:
+            try:
+                from core_engine.roughness import compute_roughness_correction
+                roughness_emissivity = compute_roughness_correction(
+                    face_normals=mesh.face_normals,
+                    epsilon_0=self._emissivity,
+                    rms_slope_deg=rms_slope_deg,
+                )
+                logger.info(
+                    "Roughness correction applied: ε_eff range [%.4f, %.4f] "
+                    "(ε₀=%.2f, θ̄=%.1f°)",
+                    roughness_emissivity.min(), roughness_emissivity.max(),
+                    self._emissivity, rms_slope_deg,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Roughness correction failed, using flat emissivity: %s", e
+                )
+
+        # Hapke parameters (loaded from config or defaults)
+        hapke_w = getattr(self._config, 'hapke_w', 0.23)
+        hapke_b = getattr(self._config, 'hapke_b', 0.21)
+        hapke_c = getattr(self._config, 'hapke_c', 0.70)
+        hapke_B_SH0 = getattr(self._config, 'hapke_B_SH0', 1.0)
+        hapke_h_s = getattr(self._config, 'hapke_h_s', 0.065)
+
         # Step 3: Initialize thermal solver + columns
         logger.info("Step 3/5: Initializing thermal solver (%d columns)...", num_faces)
         solver = CrankNicolsonSolver(self._config)
@@ -357,17 +389,41 @@ class SimulationRunner:
             sun_elev_deg = illum_result.sun_elevation_deg
 
             # 4d: Compute absorbed solar flux per face
-            # Q_solar = (1 − A) · S(t) · cos(θ) · f_illum
+            # Q_solar = [1 − A_DH(θ_i)] · S(t) · cos(θ_i) · f_illum
             cos_incidence = np.maximum(
                 0.0,
                 np.einsum("ij,j->i", mesh.face_normals, sun_dir),
             )
-            Q_solar_per_face = (
-                (1.0 - self._albedo)
-                * solar_flux_t
-                * cos_incidence
-                * illumination
-            )
+
+            # Hapke: angle-dependent directional-hemispherical albedo
+            if hapke_enabled:
+                try:
+                    from core_engine.reflectance import compute_adh_array
+                    A_DH = compute_adh_array(
+                        cos_incidence,
+                        w=hapke_w, b=hapke_b, c=hapke_c,
+                        B_SH0=hapke_B_SH0, h_s=hapke_h_s,
+                    )
+                    Q_solar_per_face = (
+                        (1.0 - A_DH)
+                        * solar_flux_t
+                        * cos_incidence
+                        * illumination
+                    )
+                except Exception:
+                    Q_solar_per_face = (
+                        (1.0 - self._albedo)
+                        * solar_flux_t
+                        * cos_incidence
+                        * illumination
+                    )
+            else:
+                Q_solar_per_face = (
+                    (1.0 - self._albedo)
+                    * solar_flux_t
+                    * cos_incidence
+                    * illumination
+                )
 
             # 4e: Compute IR flux from terrain (view factor radiosity)
             Q_ir_per_face = np.zeros(num_faces, dtype=np.float64)
@@ -387,6 +443,7 @@ class SimulationRunner:
                 )
 
             # 4f: Advance thermal state for each column
+            # Use per-face roughness-corrected emissivity
             for fi in range(num_faces):
                 solver.step(
                     columns[fi],

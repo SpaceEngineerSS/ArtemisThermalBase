@@ -4,7 +4,7 @@ build-backend = "hatchling.backends"
 
 [project]
 name = "artemis-thermal-base"
-version = "0.1.0"
+version = "0.3.0"
 description = "Research-grade Lunar South Pole micro-illumination & thermal raytracer"
 readme = "README.md"
 license = { text = "MIT" }
@@ -54,6 +54,11 @@ dev = [
 viz = [
     "plotly>=5.18.0",
     "kaleido>=0.2.1",
+]
+gui = [
+    "streamlit>=1.32.0",
+    "stpyvista>=0.1.2",
+    "pyarrow>=15.0.0",
 ]
 
 [project.scripts]
