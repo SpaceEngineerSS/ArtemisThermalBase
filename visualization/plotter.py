@@ -396,5 +396,132 @@ def generate_all_plots(
         )
         saved.append(p)
 
+    # 5. Ice stability map (if thermal data available)
+    if results.surface_temps:
+        from thermal_solver.volatiles import compute_cold_trap_map
+
+        stability = compute_cold_trap_map(results.surface_temps[-1])
+        p = output_dir / "ice_stability_map.png"
+        plot_ice_stability_map(
+            results.face_centroids,
+            stability,
+            title="Water Ice Cold Trap Stability",
+            output_path=p,
+            dpi=dpi,
+        )
+        saved.append(p)
+
     logger.info("Generated %d plots in %s", len(saved), output_dir)
     return saved
+
+
+def plot_ice_stability_map(
+    face_centroids: np.ndarray,
+    stability: np.ndarray,
+    title: str = "Water Ice Cold Trap Stability",
+    output_path: Path | str | None = None,
+    dpi: int = _DPI,
+) -> plt.Figure:
+    """Plot a cold trap stability map with high-contrast PSR visibility.
+
+    Uses a ternary color scheme:
+    - Cyan (#00e5ff): Stable (T < 110 K, retains ice > 1 Gyr)
+    - Gold (#ffd740): Marginal (110-115 K, retains ~100 Myr)
+    - Dark (#1a1a2e): Unstable (T ≥ 115 K, ice sublimates)
+
+    Parameters
+    ----------
+    face_centroids : np.ndarray
+        Face centroid coordinates. Shape: (N, 3).
+    stability : np.ndarray
+        Stability class per face (0=stable, 1=marginal, 2=unstable).
+        Shape: (N,).
+    title : str
+        Figure title.
+    output_path : Path or str, optional
+        If provided, save figure to this path.
+    dpi : int
+        Figure resolution.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure.
+
+    References
+    ----------
+    Powell, T.M. & Rubanenko, L. (2020). Cold trap stability thresholds.
+    """
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8), facecolor="#0a0a14")
+    ax.set_facecolor("#0a0a14")
+
+    x = face_centroids[:, 0]
+    y = face_centroids[:, 1]
+
+    # High-contrast ternary colormap for PSR visibility
+    stability_colors = ["#00e5ff", "#ffd740", "#1a1a2e"]
+    cmap = ListedColormap(stability_colors)
+    bounds = [-0.5, 0.5, 1.5, 2.5]
+    norm = BoundaryNorm(bounds, cmap.N)
+
+    scatter = ax.scatter(
+        x, y,
+        c=stability,
+        cmap=cmap,
+        norm=norm,
+        s=0.8,
+        edgecolors="none",
+        rasterized=True,
+    )
+
+    # Custom colorbar with labels
+    cbar = fig.colorbar(
+        scatter, ax=ax, shrink=0.8, ticks=[0, 1, 2],
+    )
+    cbar.ax.set_yticklabels(
+        ["Stable\n(< 110 K)", "Marginal\n(110-115 K)", "Unstable\n(≥ 115 K)"],
+        fontsize=9,
+    )
+    cbar.ax.yaxis.label.set_color("white")
+    cbar.ax.tick_params(colors="white")
+
+    # Count statistics
+    n_stable = int(np.sum(stability == 0))
+    n_marginal = int(np.sum(stability == 1))
+    n_unstable = int(np.sum(stability == 2))
+    n_total = len(stability)
+
+    stats_text = (
+        f"Stable: {n_stable} ({100*n_stable/n_total:.1f}%)\n"
+        f"Marginal: {n_marginal} ({100*n_marginal/n_total:.1f}%)\n"
+        f"Unstable: {n_unstable} ({100*n_unstable/n_total:.1f}%)"
+    )
+    ax.text(
+        0.02, 0.02, stats_text,
+        transform=ax.transAxes, fontsize=9,
+        color="white", fontfamily="monospace",
+        verticalalignment="bottom",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="#1a1a2e", alpha=0.8),
+    )
+
+    ax.set_xlabel("X [m]", color="white")
+    ax.set_ylabel("Y [m]", color="white")
+    ax.set_title(title, fontsize=14, fontweight="bold", color="white")
+    ax.set_aspect("equal")
+    ax.tick_params(colors="white")
+
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#333")
+
+    fig.tight_layout()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, facecolor=fig.get_facecolor())
+        logger.info("Ice stability map saved: %s", output_path)
+
+    plt.close(fig)
+    return fig

@@ -141,6 +141,16 @@ class IlluminationEngine:
             np.degrees(solar_angular_radius_rad),
         )
 
+    def get_bvh_data(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return the pre-built BVH data for reuse by other modules.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray, np.ndarray]
+            (bvh_nodes, tri_verts, ordered_indices)
+        """
+        return self._bvh_nodes, self._tri_verts, self._ordered_indices
+
     def compute(
         self,
         sun_dir: np.ndarray,

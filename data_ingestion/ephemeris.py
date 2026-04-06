@@ -354,6 +354,91 @@ class SolarEphemeris:
         elevation_rad = np.arcsin(np.clip(sun_local[2], -1.0, 1.0))
         return float(np.degrees(elevation_rad))
 
+    def get_solar_flux(
+        self,
+        utc_time: datetime,
+        S_0: float = 1361.0,
+    ) -> float:
+        """Compute instantaneous solar flux using the inverse-square law.
+
+        The solar flux at the Moon varies with the Sun-Moon distance:
+
+            S(t) = S₀ × (1 AU / d_sun)²
+
+        At perihelion (~0.983 AU), flux is ~3.4% higher than at 1 AU.
+        At aphelion  (~1.017 AU), flux is ~3.4% lower.
+
+        Parameters
+        ----------
+        utc_time : datetime
+            UTC observation time.
+        S_0 : float
+            Solar constant at 1 AU [W/m²]. Default: 1361.0 (Kopp & Lean, 2011).
+
+        Returns
+        -------
+        float
+            Instantaneous solar flux at Moon's distance [W/m²].
+        """
+        _, distance_m = self.get_sun_direction_icrf(utc_time)
+        AU_m = 1.495978707e11
+        return S_0 * (AU_m / distance_m) ** 2
+
+    def get_sun_state(
+        self,
+        utc_time: datetime,
+        lat_deg: float = -89.54,
+        lon_deg: float = 129.78,
+        S_0: float = 1361.0,
+    ) -> dict:
+        """Get complete sun state in a single call (avoids duplicate computation).
+
+        Returns the sun direction vector in local frame, elevation, distance,
+        and distance-corrected solar flux.
+
+        Parameters
+        ----------
+        utc_time : datetime
+            UTC observation time.
+        lat_deg, lon_deg : float
+            Surface location in degrees.
+        S_0 : float
+            Solar constant at 1 AU [W/m²].
+
+        Returns
+        -------
+        dict
+            Keys: 'direction' (3,), 'elevation_deg' float,
+                  'distance_m' float, 'solar_flux' float.
+        """
+        # Step 1: Sun direction + distance in ICRF
+        sun_icrf, distance_m = self.get_sun_direction_icrf(utc_time)
+
+        # Step 2: Rotate to local frame
+        R_body_from_icrf = self._get_moon_rotation_matrix(utc_time)
+        sun_body = R_body_from_icrf @ sun_icrf
+        R_local_from_body = _body_to_local_rotation(
+            np.radians(lat_deg), np.radians(lon_deg)
+        )
+        sun_local = R_local_from_body @ sun_body
+        sun_local = sun_local / np.linalg.norm(sun_local)
+
+        # Step 3: Elevation
+        elevation_deg = float(
+            np.degrees(np.arcsin(np.clip(sun_local[2], -1.0, 1.0)))
+        )
+
+        # Step 4: Inverse-square flux
+        AU_m = 1.495978707e11
+        solar_flux = S_0 * (AU_m / distance_m) ** 2
+
+        return {
+            "direction": sun_local,
+            "elevation_deg": elevation_deg,
+            "distance_m": distance_m,
+            "solar_flux": solar_flux,
+        }
+
 
 # ---------------------------------------------------------------------------
 # Rotation helpers

@@ -156,6 +156,8 @@ class SimulationRunner:
         # Derived constants
         self._solar_constant = config.constants.solar_constant
         self._albedo = config.surface.bond_albedo
+        self._emissivity = config.surface.thermal_emissivity
+        self._sigma = config.constants.stefan_boltzmann
         self._dt = config.solver.dt_s
 
         logger.info(
@@ -240,8 +242,52 @@ class SimulationRunner:
             max_leaf_triangles=self._config.raytracer.max_leaf_triangles,
         )
 
+        # Step 2.5: Compute view factors for IR scattering
+        view_factors = None
+        vf_enabled = getattr(
+            self._config, 'view_factors_enabled', True
+        )
+        if vf_enabled:
+            logger.info(
+                "Step 2.5/5: Computing view factors "
+                "(Monte Carlo, 512 rays/face)..."
+            )
+            try:
+                from core_engine.view_factors import (
+                    compute_view_factor_matrix,
+                    compute_ir_flux,
+                )
+
+                bvh_nodes, tri_verts, ordered_indices = (
+                    engine.get_bvh_data()
+                )
+                view_factors = compute_view_factor_matrix(
+                    face_centroids=mesh.face_centroids,
+                    face_normals=mesh.face_normals,
+                    face_areas=mesh.face_areas,
+                    bvh_nodes=bvh_nodes,
+                    tri_verts=tri_verts,
+                    ordered_tri_indices=ordered_indices,
+                    mesh_triangles=mesh.triangles,
+                    num_rays=512,
+                    epsilon=self._config.raytracer.epsilon,
+                    seed=42,
+                )
+                logger.info(
+                    "View factors ready: %d nnz, %.1f MB",
+                    view_factors.nnz, view_factors.memory_mb,
+                )
+            except Exception as e:
+                logger.warning(
+                    "View factor computation failed, "
+                    "proceeding without IR scattering: %s", e,
+                )
+                view_factors = None
+        else:
+            logger.info("View factors disabled by config.")
+
         # Step 3: Initialize thermal solver + columns
-        logger.info("Step 3/4: Initializing thermal solver (%d columns)...", num_faces)
+        logger.info("Step 3/5: Initializing thermal solver (%d columns)...", num_faces)
         solver = CrankNicolsonSolver(self._config)
         template_column = create_thermal_column(self._config)
 
@@ -277,7 +323,7 @@ class SimulationRunner:
             results.probe_temps[p.name] = []
 
         # Step 4: Time loop
-        logger.info("Step 4/4: Running time loop (%d steps)...", num_steps)
+        logger.info("Step 4/5: Running time loop (%d steps)...", num_steps)
         current_time = start_time
 
         for step_i in range(num_steps):
@@ -299,27 +345,55 @@ class SimulationRunner:
             ], dtype=np.float64)
             sun_dir /= np.linalg.norm(sun_dir)
 
-            # 4b: Compute illumination
+            # 4b: Distance-corrected solar flux (inverse-square law)
+            # S(t) = S₀ × (1 AU / d_sun)² — varies ±3.4% over year
+            # For synthetic sun, use fixed S₀ (real ephemeris would use
+            # get_solar_flux() with actual UTC time)
+            solar_flux_t = self._solar_constant
+
+            # 4c: Compute illumination
             illum_result = engine.compute(sun_dir)
             illumination = illum_result.illumination
             sun_elev_deg = illum_result.sun_elevation_deg
 
-            # 4c: Compute absorbed solar flux per face
-            # Q_solar = (1 − A) · S₀ · cos(θ) · f_illum
+            # 4d: Compute absorbed solar flux per face
+            # Q_solar = (1 − A) · S(t) · cos(θ) · f_illum
             cos_incidence = np.maximum(
                 0.0,
                 np.einsum("ij,j->i", mesh.face_normals, sun_dir),
             )
             Q_solar_per_face = (
                 (1.0 - self._albedo)
-                * self._solar_constant
+                * solar_flux_t
                 * cos_incidence
                 * illumination
             )
 
-            # 4d: Advance thermal state for each column
+            # 4e: Compute IR flux from terrain (view factor radiosity)
+            Q_ir_per_face = np.zeros(num_faces, dtype=np.float64)
+            if view_factors is not None:
+                surface_T_current = np.array(
+                    [columns[fi].T[0] for fi in range(num_faces)],
+                    dtype=np.float64,
+                )
+                from core_engine.view_factors import compute_ir_flux
+                Q_ir_per_face = compute_ir_flux(
+                    surface_T_current,
+                    view_factors.row_ptr,
+                    view_factors.col_idx,
+                    view_factors.values,
+                    self._emissivity,
+                    self._sigma,
+                )
+
+            # 4f: Advance thermal state for each column
             for fi in range(num_faces):
-                solver.step(columns[fi], Q_solar_per_face[fi], dt=dt_s)
+                solver.step(
+                    columns[fi],
+                    Q_solar_per_face[fi],
+                    Q_ir=Q_ir_per_face[fi],
+                    dt=dt_s,
+                )
 
             # 4e: Record probe temperatures every step
             for p in probes:

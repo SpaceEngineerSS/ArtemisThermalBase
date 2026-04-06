@@ -188,8 +188,8 @@ ArtemisThermalBase/
 | 1.5 | Hero renderer + data persistence + `--render-only` | ✅ Complete |
 | 2 | Real NASA LRO LOLA data pipeline + `--dem` flag | ✅ Complete |
 | 3 | C++ BVH raytracer with pybind11 | ⬜ Planned |
-| 4 | Multi-bounce IR radiation + view factors | ⬜ Planned |
-| 5 | Diviner validation + documentation | ⬜ Planned |
+| 4 | Multi-bounce IR (sparse view factors) + volatile stability | ✅ Complete |
+| 5 | Diviner validation + Hapke reflectance | ⬜ Planned |
 
 ---
 
@@ -202,7 +202,7 @@ Duration: 6.0 hours (72 steps)
 Wall time: 1234.8 s
 Final T: min=88.4 K, max=337.7 K, mean=100.5 K
 Output files: illumination_map.png, thermal_map.png, time_series.png,
-              sun_elevation.png, hero_artemis.png
+              sun_elevation.png, ice_stability_map.png, hero_artemis.png
 ```
 
 The output includes 8 raw data files (NumPy `.npy` + metadata JSON) enabling re-rendering without re-running the physics.
@@ -219,7 +219,7 @@ If you use ArtemisThermalBase in your research, please cite:
   title        = {ArtemisThermalBase: High-Fidelity Lunar South Pole Thermal Simulation},
   year         = {2026},
   url          = {https://github.com/SpaceEngineerSS/ArtemisThermalBase},
-  version      = {0.1.0}
+  version      = {0.2.0}
 }
 ```
 
@@ -234,6 +234,7 @@ If you use ArtemisThermalBase in your research, please cite:
 5. Zuber, M.T., et al. (2012). "Constraints on the volatile distribution within Shackleton crater at the Moon's south pole." *Nature*, 486, 378-381.
 6. Möller, T. & Trumbore, B. (1997). "Fast, minimum storage ray-triangle intersection." *J. Graphics Tools*, 2(1), 21-28.
 7. Smith, D.E., et al. (2017). "Summary of the results from the Lunar Orbiter Laser Altimeter after seven years in lunar orbit." *Icarus*, 283, 70-91.
+8. Powell, T.M. & Rubanenko, L. (2020). "Cold trap stability and ice retention in the Moon's south polar region." *AGU Fall Meeting*.
 
 ---
 

@@ -316,6 +316,107 @@ def _shadow_ray_bvh(
     return False  # No occlusion
 
 
+@njit(cache=True, fastmath=False)
+def _closest_hit_bvh(
+    ray_origin: np.ndarray,
+    ray_dir: np.ndarray,
+    bvh_nodes: np.ndarray,
+    tri_verts: np.ndarray,
+    ordered_tri_indices: np.ndarray,
+    epsilon: float,
+) -> tuple[int64, float64]:
+    """Find the closest triangle hit by a ray using BVH traversal.
+
+    Unlike ``_shadow_ray_bvh`` which early-exits on ANY hit, this function
+    traverses the full BVH to find the CLOSEST intersection. Required for
+    view factor computation where we need to know which face a ray hits.
+
+    Parameters
+    ----------
+    ray_origin : np.ndarray
+        Ray origin. Shape: (3,).
+    ray_dir : np.ndarray
+        Ray direction (need not be normalized). Shape: (3,).
+    bvh_nodes : np.ndarray
+        Flattened BVH node array.
+    tri_verts : np.ndarray
+        Triangle vertices. Shape: (num_triangles, 3, 3).
+    ordered_tri_indices : np.ndarray
+        Triangle indices in BVH leaf order.
+    epsilon : float
+        Intersection epsilon.
+
+    Returns
+    -------
+    closest_tri_idx : int
+        Index of closest hit triangle, or -1 if no hit.
+    closest_t : float
+        Parametric distance to closest hit, or INF if no hit.
+    """
+    inv_dir = np.empty(3, dtype=np.float64)
+    for axis in range(3):
+        if ray_dir[axis] == 0.0:
+            inv_dir[axis] = _INF
+        else:
+            inv_dir[axis] = 1.0 / ray_dir[axis]
+
+    stack = np.empty(64, dtype=np.int64)
+    stack_ptr = 0
+    stack[stack_ptr] = 0
+    stack_ptr += 1
+
+    bbox_min_tmp = np.empty(3, dtype=np.float64)
+    bbox_max_tmp = np.empty(3, dtype=np.float64)
+
+    closest_t = _INF
+    closest_tri_idx = int64(-1)
+
+    while stack_ptr > 0:
+        stack_ptr -= 1
+        node_idx = stack[stack_ptr]
+        base = node_idx * _NODE_SIZE
+
+        bbox_min_tmp[0] = bvh_nodes[base + _BBOX_MIN_X]
+        bbox_min_tmp[1] = bvh_nodes[base + _BBOX_MIN_Y]
+        bbox_min_tmp[2] = bvh_nodes[base + _BBOX_MIN_Z]
+        bbox_max_tmp[0] = bvh_nodes[base + _BBOX_MAX_X]
+        bbox_max_tmp[1] = bvh_nodes[base + _BBOX_MAX_Y]
+        bbox_max_tmp[2] = bvh_nodes[base + _BBOX_MAX_Z]
+
+        if not ray_aabb_intersect(
+            ray_origin, inv_dir, bbox_min_tmp, bbox_max_tmp, closest_t
+        ):
+            continue
+
+        count_or_right = bvh_nodes[base + _COUNT_OR_RIGHT]
+
+        if count_or_right < 0:
+            # LEAF NODE
+            start = int(bvh_nodes[base + _CHILD_OR_START])
+            count = int(-count_or_right)
+            for i in range(start, start + count):
+                tri_idx = ordered_tri_indices[i]
+                v0 = tri_verts[tri_idx, 0]
+                v1 = tri_verts[tri_idx, 1]
+                v2 = tri_verts[tri_idx, 2]
+                t_hit = moller_trumbore(
+                    ray_origin, ray_dir, v0, v1, v2, epsilon
+                )
+                if t_hit > epsilon and t_hit < closest_t:
+                    closest_t = t_hit
+                    closest_tri_idx = int64(tri_idx)
+        else:
+            # INTERNAL NODE
+            left = int(bvh_nodes[base + _CHILD_OR_START])
+            right = int(count_or_right)
+            stack[stack_ptr] = left
+            stack_ptr += 1
+            stack[stack_ptr] = right
+            stack_ptr += 1
+
+    return closest_tri_idx, closest_t
+
+
 @njit(cache=True, parallel=True, fastmath=False)
 def compute_shadow_map_point_source(
     face_centroids: np.ndarray,

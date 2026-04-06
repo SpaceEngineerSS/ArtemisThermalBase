@@ -133,6 +133,24 @@ synthetic_dem:
   # Random seed for any stochastic terrain features
   seed: 42
 
+# --- View Factors (Milestone 4: Multi-bounce IR) ---
+# Monte Carlo view factor computation for thermal radiosity
+view_factors:
+  enabled: true                        # Enable IR scattering between terrain faces
+  num_rays: 512                        # Rays per face (512 = publication quality, ~3-4% noise)
+  seed: 42                             # Random seed for reproducibility
+  reciprocity_tolerance: 1.0e-5        # Tolerance for A_i*F_ij ≈ A_j*F_ji validation
+  max_neighbors: 256                   # Max non-zero entries per row (memory cap)
+
+# --- Volatile Stability (Milestone 4: Ice Model) ---
+# Water ice sublimation and cold trap classification
+volatiles:
+  enabled: true                        # Enable volatile stability computation
+  model: "langmuir"                    # Options: "langmuir", "hertz_knudsen"
+  ice_thresholds_K:
+    stable: 110.0                      # [K] Ice stable for > 1 Gyr (Powell & Rubanenko, 2020)
+    marginal: 115.0                    # [K] Ice stable for ~100 Myr
+
 # --- Simulation Time Range ---
 time_range:
   # For Milestone 1: short test run
