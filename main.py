@@ -174,7 +174,7 @@ def main() -> int:
         return 0
 
     # Full simulation mode
-    from core_engine.constants import load_config
+    from core_engine.constants import load_config, log_assumptions, log_platform_info
     from simulation.runner import SimulationRunner
     from visualization.hero_renderer import render_hero_image
     from visualization.plotter import generate_all_plots
@@ -183,6 +183,8 @@ def main() -> int:
     config_path = Path(args.config)
     logger.info("Loading config: %s", config_path)
     config = load_config(config_path)
+    log_platform_info()
+    log_assumptions(config)
 
     # Load external DEM if provided
     external_dem = None

@@ -27,7 +27,7 @@
 ```yaml
 metadata:
   project_name: "ArtemisThermalBase"
-  version: "0.1.0"
+  version: "0.4.0-preview"
   author: "Mehmet Gümüş"
 ```
 
@@ -53,7 +53,7 @@ target:
 | `diameter_km` | float | km | > 0 | LOLA measurements |
 | `depth_km` | float | km | > 0 | Topographic analysis |
 
-**Physical implication**: These coordinates are passed to the Skyfield ephemeris engine to compute solar elevation and azimuth angles at the target site. Changing the latitude significantly affects shadow geometry — equatorial sites receive direct sunlight for ~50% of a lunar day, while polar sites may receive near-zero direct illumination.
+**Physical implication**: These coordinates are passed to the selected ephemeris engine. Research mode uses the NAIF `MOON_ME` frame. Changing the coordinates changes both local solar geometry and the DEM window that must be prepared.
 
 ---
 
@@ -119,7 +119,7 @@ surface:
 **Physical implications**:
 - **Increasing `bond_albedo`** → more solar flux reflected → lower equilibrium temperatures. A 10% increase in albedo reduces peak temperatures by ~15–20 K.
 - **Decreasing `thermal_emissivity`** → less efficient radiative cooling → higher nighttime temperatures. PSR temperature estimates are particularly sensitive to this parameter.
-- **Reflectance model**: Only Lambertian is currently supported. A future Hapke model (Milestone 5) would compute direction-dependent reflectance.
+- **Reflectance model**: Lambertian preview and configurable Hapke directional-hemispherical albedo are implemented. Research runs must report the selected parameters and their source.
 
 ---
 
@@ -335,7 +335,38 @@ reproducibility:
 ```
 
 - **`log_platform_info`**: Logs Python version, OS, CPU, NumPy version for debugging cross-platform discrepancies.
-- **`hash_outputs`**: Computes SHA-256 hash of output arrays for bitwise reproducibility verification.
+- **`hash_outputs`**: Saved result files are listed in `checksums.sha256` with SHA-256 digests.
+
+---
+
+## 12. Ephemeris and Research Mode
+
+```yaml
+ephemeris:
+  mode: "spice"
+  kernel_files:
+    - "data/ephemeris/naif0012.tls"
+    - "data/ephemeris/de440s.bsp"
+    - "data/ephemeris/moon_pa_de440_200625.bpc"
+    - "data/ephemeris/moon_de440_250416.tf"
+  frame: "MOON_ME"
+  aberration_correction: "LT+S"
+
+research:
+  enabled: true
+  require_real_dem: true
+  require_dem_provenance: true
+  minimum_spinup_cycles: 3
+```
+
+`synthetic` is the offline preview mode. `skyfield` is retained for compatibility.
+Publication-oriented runs use `spice`, pinned local kernels, and the lunar Mean
+Earth frame. Research mode fails if the DEM is synthetic, lacks a valid SHA-256
+sidecar, the kernels are absent, or spin-up is below the configured minimum.
+
+Use `config/research_shackleton.yaml` rather than manually copying the defaults.
+It is a small overlay on `default_config.yaml`, so shared physical parameters do
+not silently diverge.
 
 ---
 
@@ -343,10 +374,10 @@ reproducibility:
 
 | Parameter | Sensitivity | Effect on PSR Temperature |
 |-----------|-------------|--------------------------|
-| `k_contact` (surface) | **High** | ±50% change → ±15–25 K |
-| `thermal_emissivity` | **High** | ±0.02 → ±5–10 K |
-| `bond_albedo` | **Medium** | ±0.03 → ±3–5 K (dayside only) |
-| `geothermal_flux` | **Medium** | ±50% → ±5–8 K (deep temps) |
-| `density_surface` | **Low** | ±200 kg/m³ → ±2–3 K |
+| `k_contact` (surface) | **High** | Quantify with a run-specific ensemble |
+| `thermal_emissivity` | **High** | Quantify with a run-specific ensemble |
+| `bond_albedo` | **Medium** | Primarily affects illuminated facets |
+| `geothermal_flux` | **Medium** | Important for deep and long-duration cold conditions |
+| `density_surface` | **Lower** | Coupled to thermal inertia; quantify jointly with conductivity |
 | `dt_s` | **N/A** | Numerical parameter, no physical effect if converged |
-| `solar_disk_samples` | **N/A** | Controls penumbra noise, not equilibrium temperatures |
+| `solar_disk_samples` | **Numerical** | Can affect penumbra heating; demonstrate quadrature convergence |

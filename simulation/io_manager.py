@@ -13,6 +13,7 @@ File layout under output_dir/:
     probe_temps.npz        — Probe temperature time series (one key per probe)
     sun_elevations.npy     — Sun elevation [deg] per output snapshot
     metadata.json          — Simulation metadata (JSON)
+    checksums.sha256       — SHA-256 manifest for every saved result file
 
 Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
 """
@@ -24,6 +25,8 @@ import logging
 from pathlib import Path
 
 import numpy as np
+
+from data_ingestion.provenance import sha256_file
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,14 @@ def save_results(
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(safe_meta, f, indent=2, ensure_ascii=False)
     saved.append(meta_path)
+
+    checksum_path = output_dir / "checksums.sha256"
+    checksum_lines = [
+        f"{sha256_file(path)}  {path.name}"
+        for path in sorted(saved, key=lambda item: item.name)
+    ]
+    checksum_path.write_text("\n".join(checksum_lines) + "\n", encoding="ascii")
+    saved.append(checksum_path)
 
     logger.info(
         "Saved %d files to %s (thermal: %s, illum: %s)",

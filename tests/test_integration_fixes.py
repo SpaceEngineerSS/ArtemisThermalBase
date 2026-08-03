@@ -55,6 +55,9 @@ def test_dashboard_reads_canonical_simulation_files(tmp_path) -> None:
     assert np.array_equal(dashboard_data["surface_temps"], [120.0, 130.0])
     assert np.array_equal(dashboard_data["illumination"], [0.0, 1.0])
     assert dashboard_data["metadata"]["num_faces"] == 2
+    checksums = (tmp_path / "checksums.sha256").read_text(encoding="ascii")
+    assert "thermal_grid.npy" in checksums
+    assert "metadata.json" in checksums
 
 
 def test_batch_solver_matches_scalar_solver(config) -> None:

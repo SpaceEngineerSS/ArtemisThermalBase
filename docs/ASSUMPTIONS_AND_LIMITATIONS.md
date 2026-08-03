@@ -125,10 +125,10 @@ The simulation models the natural thermal environment only. Spacecraft thermal i
 
 | Approximation | Details | Error Bound |
 |---------------|---------|-------------|
-| Crank-Nicolson temporal discretization | $O(\Delta t^2)$ | < 0.1 K at dt = 120 s |
-| Non-uniform FD spatial discretization | $O(\Delta z^2)$ | < 0.05 K with geometric grid |
+| Crank-Nicolson temporal discretization | Formally $O(\Delta t^2)$ for the linear problem | Bound pending timestep convergence study |
+| Non-uniform FD spatial discretization | Grid-dependent | Bound pending depth-grid convergence study |
 | Newton linearization of $T^4$ | Converges in 2–4 iterations | $10^{-4}$ K tolerance |
-| Fibonacci disk sampling (64 points) | ~1.5% noise at shadow edges | < 0.02 illumination fraction |
+| Fibonacci disk sampling (64 points) | Deterministic quadrature error at shadow edges | Bound pending 16/32/64/128 refinement |
 | Harmonic mean for interface conductivity | Exact for piecewise-constant k | N/A (exact) |
 | Thomas algorithm (TDMA) | Exact for tridiagonal systems | Machine precision |
 
@@ -138,9 +138,9 @@ The simulation models the natural thermal environment only. Spacecraft thermal i
 
 | Against | Status | Reference |
 |---------|--------|-----------|
-| LRO Diviner surface temperatures | Planned (Milestone 5) | Paige et al. (2010) |
+| LRO Diviner surface temperatures | Observation matching pending | Paige et al. (2010) |
 | Analytical solutions (flat surface) | Partial — initial testing | Spencer et al. (1989) |
-| Energy conservation (internal check) | ✅ Implemented | `compute_internal_energy()` |
+| Column internal-energy diagnostic | Implemented; not a global closure proof | `compute_internal_energy()` |
 
 ---
 
@@ -148,9 +148,9 @@ The simulation models the natural thermal environment only. Spacecraft thermal i
 
 | Milestone | Feature | Impact on Accuracy |
 |-----------|---------|--------------------|
-| 3 | C++ BVH raytracer (pybind11) | Performance only (no accuracy change) |
+| 3 | Compiled LBVH/native backend after profiling | Performance only; preserve numerical tests |
 | Future | Iterative multi-bounce IR radiosity | Reduce remaining terrain-IR bias |
-| 5 | Diviner validation + Hapke reflectance | Quantified error bars |
-| Future | 3D heat conduction | ±1–3 K at shadow boundaries |
-| Future | Orbital eccentricity correction | ±3% flux |
+| Future | Diviner observation matching and validation report | Quantified error bars |
+| Future | 3D heat conduction | Quantify lateral-conduction effects at shadow boundaries |
+| Implemented in SPICE mode | Sun-Moon distance correction | Time-varying inverse-square flux |
 | Future | Water ice thermal properties | Critical for volatile stability |

@@ -1,6 +1,19 @@
-# ArtemisThermalBase
+<p align="center">
+  <img src="docs/hero_artemis.png" alt="ArtemisThermalBase illustrative synthetic preview" width="900">
+</p>
 
-Open-source lunar south-pole illumination and thermal simulation with
+<h1 align="center">ArtemisThermalBase</h1>
+
+<p align="center">
+  <a href="https://github.com/SpaceEngineerSS/ArtemisThermalBase/actions"><img src="https://img.shields.io/github/actions/workflow/status/SpaceEngineerSS/ArtemisThermalBase/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB" alt="Python 3.11+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT license"></a>
+  <a href="CITATION.cff"><img src="https://img.shields.io/badge/Citation-CFF-blue" alt="Citation CFF"></a>
+</p>
+
+<p align="center"><em>The header image is an illustrative synthetic preview, not a LOLA/Diviner validation product.</em></p>
+
+Version 0.4.0 - open-source lunar south-pole illumination and thermal simulation with
 BVH-accelerated ray tracing, an implicit subsurface heat solver, real LOLA
 topography support, and NAIF/JPL lunar geometry.
 
@@ -22,6 +35,7 @@ topography support, and NAIF/JPL lunar geometry.
   roughness-adjusted emissivity, one-bounce terrain IR, and spin-up convergence.
 - A fail-closed research mode that rejects synthetic/unverified DEMs, missing
   kernels, analytical ephemeris fallbacks, and insufficient spin-up.
+- A `checksums.sha256` manifest for every persisted simulation result bundle.
 
 ## Installation
 
@@ -104,6 +118,26 @@ the bottom boundary. The subsurface equation is:
 The default vertical grid has 100 geometrically stretched layers and is about
 6.19 m deep. Full equations and implementation assumptions are in
 [Physics Model](docs/PHYSICS_MODEL.md).
+
+## Model architecture
+
+```mermaid
+flowchart LR
+    LOLA["LOLA DEM + provenance"] --> Mesh["Metric mesh + BVH"]
+    NAIF["NAIF DE440 / MOON_ME"] --> Sun["Extended solar disk"]
+    Sun --> Rays["Per-sample shadow rays"]
+    Mesh --> Rays
+    Rays --> Flux["Projected absorbed flux"]
+    Mesh --> VF["Sparse terrain view factors"]
+    VF --> Flux
+    Flux --> CN["Batched nonlinear Crank-Nicolson columns"]
+    CN --> Output["Results + metadata + SHA-256 manifest"]
+    Output --> Diviner["Diviner comparison - pending"]
+```
+
+The preview path may substitute synthetic terrain and solar motion. The research
+path requires the LOLA and NAIF inputs shown above and fails closed if their
+provenance cannot be established.
 
 ## Quality gates
 

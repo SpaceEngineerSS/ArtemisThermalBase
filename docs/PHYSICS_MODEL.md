@@ -2,7 +2,7 @@
 
 > **Technical Whitepaper: First-Principles Derivation of the Thermal Simulation Engine**
 >
-> Author: Mehmet Gümüş · Version 0.1.0 · February 2026
+> Author: Mehmet Gümüş · Version 0.4.0 · August 2026
 
 ---
 
@@ -446,7 +446,7 @@ $$
 ### Selenographic Coordinates
 
 The simulation target is specified in **selenographic coordinates**:
-- Latitude: $-89.54°$ (Shackleton Crater, Zuber et al., 2012)
+- Latitude: $-89.67°$ (Shackleton Crater center, USGS Gazetteer feature 5450)
 - Longitude: $129.78°$
 
 ### Local Cartesian Frame
@@ -486,4 +486,4 @@ mode; the default offline preview uses the explicitly labeled synthetic polar Su
 
 ---
 
-> Implementation: [crank_nicolson.py](file:///c:/Users/mehme/Desktop/ArtemisThermalBase/thermal_solver/crank_nicolson.py) · [raytracer.py](file:///c:/Users/mehme/Desktop/ArtemisThermalBase/core_engine/raytracer.py) · [solar_disk.py](file:///c:/Users/mehme/Desktop/ArtemisThermalBase/core_engine/solar_disk.py) · [regolith_properties.py](file:///c:/Users/mehme/Desktop/ArtemisThermalBase/thermal_solver/regolith_properties.py)
+> Implementation: [crank_nicolson.py](../thermal_solver/crank_nicolson.py) · [raytracer.py](../core_engine/raytracer.py) · [solar_disk.py](../core_engine/solar_disk.py) · [regolith_properties.py](../thermal_solver/regolith_properties.py)

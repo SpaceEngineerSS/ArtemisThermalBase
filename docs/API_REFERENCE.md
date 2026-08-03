@@ -272,8 +272,9 @@ loader = LOLALoader(
     nodata_threshold=-1.0e30,
     fill_nodata=True,
     center_elevation=True,
+    require_provenance=True,
 )
-dem = loader.load_dem("data/sample_lola_dem.tif")
+dem = loader.load_dem("data/processed/shackleton_lola_240m.tif")
 ```
 
 #### Constructor
@@ -283,6 +284,7 @@ dem = loader.load_dem("data/sample_lola_dem.tif")
 | `nodata_threshold` | `float` | -1e30 | Values below this are treated as NoData |
 | `fill_nodata` | `bool` | True | Fill NoData with nearest-neighbor interpolation |
 | `center_elevation` | `bool` | True | Subtract mean to center around zero |
+| `require_provenance` | `bool` | False | Verify the canonical SHA-256 sidecar before loading |
 
 #### `load_dem()`
 
@@ -318,10 +320,30 @@ from data_ingestion.ephemeris import SolarEphemeris
 ephemeris = SolarEphemeris()
 sun_direction = ephemeris.get_sun_direction_local(
     datetime(2026, 1, 1, tzinfo=timezone.utc),
-    lat_deg=-89.54,
+    lat_deg=-89.67,
     lon_deg=129.78,
 )
 ```
+
+Skyfield is a compatibility path. Research runs use the fail-closed SPICE API:
+
+```python
+from data_ingestion.spice_ephemeris import SpiceSolarEphemeris
+
+ephemeris = SpiceSolarEphemeris(
+    config.ephemeris.kernel_files,
+    frame="MOON_ME",
+    aberration_correction="LT+S",
+)
+state = ephemeris.get_sun_state(
+    datetime(2026, 1, 1, tzinfo=timezone.utc),
+    lat_deg=-89.67,
+    lon_deg=129.78,
+)
+```
+
+`state` includes local direction, elevation, Sun-Moon distance, irradiance,
+light time, and frame. `ephemeris.provenance` returns each kernel SHA-256 digest.
 
 ---
 
