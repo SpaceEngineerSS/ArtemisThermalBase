@@ -24,8 +24,16 @@ jobs:
         run: python -m pytest tests/test_raytracer.py::TestMollerTrumbore
       - name: Test ray-box intersections
         run: python -m pytest tests/test_raytracer.py::TestRayAABB
-      - name: Test BVH shadow maps
-        run: python -m pytest tests/test_raytracer.py::TestBVHShadowMap
+      - name: Test BVH construction
+        run: python -m pytest tests/test_raytracer.py::TestBVHShadowMap::test_bvh_builds_without_error
+      - name: Test overhead BVH illumination
+        run: python -m pytest tests/test_raytracer.py::TestBVHShadowMap::test_flat_terrain_full_illumination
+      - name: Test BVH shadow monotonicity
+        run: python -m pytest tests/test_raytracer.py::TestBVHShadowMap::test_shadow_fraction_increases_with_lower_sun
+      - name: Test BVH shadow boundary
+        run: python -m pytest tests/test_raytracer.py::TestBVHShadowMap::test_shadow_boundary_moves_with_sun_angle
+      - name: Test BVH crater-center shadow
+        run: python -m pytest tests/test_raytracer.py::TestBVHShadowMap::test_center_shadowed_below_critical_angle
       - name: Test thermal solver
         run: python -m pytest tests/test_thermal_solver.py
       - name: Test physics v2
