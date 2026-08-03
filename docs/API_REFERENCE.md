@@ -311,13 +311,16 @@ dem = generate_synthetic_dem(config.synthetic_dem)
 ### `data_ingestion.ephemeris`
 
 ```python
-from data_ingestion.ephemeris import get_sun_direction
+from datetime import datetime, timezone
 
-sun_dir = get_sun_direction(
-    time_utc=datetime(2025, 1, 1),
+from data_ingestion.ephemeris import SolarEphemeris
+
+ephemeris = SolarEphemeris()
+sun_direction = ephemeris.get_sun_direction_local(
+    datetime(2026, 1, 1, tzinfo=timezone.utc),
     lat_deg=-89.54,
     lon_deg=129.78,
-)  # Returns (3,) unit vector
+)
 ```
 
 ---

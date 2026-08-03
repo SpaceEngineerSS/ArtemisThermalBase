@@ -31,12 +31,13 @@ Ephemeris kernel files (*.bsp) are large (~17 MB for DE421). The
 ``SolarEphemeris`` class automatically manages kernel downloads to
 a configurable data directory and logs the location. These files
 should be added to ``.gitignore``.
+
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,7 @@ class SolarEphemeris:
     ...     lon_deg=129.78,
     ... )
     >>> print(sun_dir)  # (x, y, z) unit vector in local frame
+
     """
 
     def __init__(
@@ -167,12 +169,13 @@ class SolarEphemeris:
             Unit vector from Moon center toward Sun in ICRF. Shape: (3,).
         distance_m : float
             Sun-Moon distance in meters.
+
         """
         self._ensure_loaded()
 
         # Convert datetime to Skyfield Time
         if utc_time.tzinfo is None:
-            utc_time = utc_time.replace(tzinfo=timezone.utc)
+            utc_time = utc_time.replace(tzinfo=UTC)
 
         t = self._timescale.from_datetime(utc_time)
 
@@ -192,7 +195,7 @@ class SolarEphemeris:
     def get_sun_direction_local(
         self,
         utc_time: datetime,
-        lat_deg: float = -89.54,
+        lat_deg: float = -89.67,
         lon_deg: float = 129.78,
         R: float = _LUNAR_RADIUS_M,
     ) -> np.ndarray:
@@ -225,6 +228,7 @@ class SolarEphemeris:
         sun_dir_local : np.ndarray
             Unit vector toward the Sun in local Cartesian frame.
             Shape: (3,). z > 0 means Sun is above horizon.
+
         """
         # Step 1: Sun direction in ICRF
         sun_icrf, distance_m = self.get_sun_direction_icrf(utc_time)
@@ -262,18 +266,17 @@ class SolarEphemeris:
         -------
         R : np.ndarray
             3×3 rotation matrix. Shape: (3, 3).
+
         """
         self._ensure_loaded()
 
         if utc_time.tzinfo is None:
-            utc_time = utc_time.replace(tzinfo=timezone.utc)
+            utc_time = utc_time.replace(tzinfo=UTC)
 
         t = self._timescale.from_datetime(utc_time)
 
         # Use Skyfield's built-in Moon frame (includes libration)
         try:
-            from skyfield.api import load as skyfield_load
-            from skyfield.data import mpc
             from skyfield.framelib import moon_frame
 
             # The moon_frame from skyfield.framelib provides full
@@ -308,6 +311,7 @@ class SolarEphemeris:
         -------
         R : np.ndarray
             3×3 rotation matrix ICRF → body-fixed.
+
         """
         # Julian centuries from J2000.0
         T = (t.tdb - 2451545.0) / 36525.0
@@ -333,7 +337,7 @@ class SolarEphemeris:
     def get_sun_elevation_deg(
         self,
         utc_time: datetime,
-        lat_deg: float = -89.54,
+        lat_deg: float = -89.67,
         lon_deg: float = 129.78,
     ) -> float:
         """Get the Sun's elevation angle above the local horizon.
@@ -349,6 +353,7 @@ class SolarEphemeris:
         -------
         float
             Sun elevation in degrees. Positive = above horizon.
+
         """
         sun_local = self.get_sun_direction_local(utc_time, lat_deg, lon_deg)
         elevation_rad = np.arcsin(np.clip(sun_local[2], -1.0, 1.0))
@@ -379,6 +384,7 @@ class SolarEphemeris:
         -------
         float
             Instantaneous solar flux at Moon's distance [W/m²].
+
         """
         _, distance_m = self.get_sun_direction_icrf(utc_time)
         AU_m = 1.495978707e11
@@ -387,7 +393,7 @@ class SolarEphemeris:
     def get_sun_state(
         self,
         utc_time: datetime,
-        lat_deg: float = -89.54,
+        lat_deg: float = -89.67,
         lon_deg: float = 129.78,
         S_0: float = 1361.0,
     ) -> dict:
@@ -410,6 +416,7 @@ class SolarEphemeris:
         dict
             Keys: 'direction' (3,), 'elevation_deg' float,
                   'distance_m' float, 'solar_flux' float.
+
         """
         # Step 1: Sun direction + distance in ICRF
         sun_icrf, distance_m = self.get_sun_direction_icrf(utc_time)
@@ -497,6 +504,7 @@ def _body_to_local_rotation(
     -------
     R : np.ndarray
         3×3 rotation matrix body-fixed → local. Shape: (3, 3).
+
     """
     cos_lat = np.cos(lat_rad)
     sin_lat = np.sin(lat_rad)

@@ -1,0 +1,45 @@
+extends: default_config.yaml
+
+metadata:
+  version: "0.4.0-research"
+  description: >
+    Fail-closed Shackleton research configuration using provenance-verified
+    LOLA topography and NAIF DE440 lunar orientation. Validation against
+    Diviner is tracked separately and is not claimed by this configuration.
+
+solver:
+  thermal:
+    time:
+      dt_s: 120.0
+    batch_size_faces: 25000
+  illumination:
+    solar_disk_samples: 64
+    point_source_mode: false
+
+view_factors:
+  enabled: true
+  num_rays: 512
+  seed: 42
+
+ephemeris:
+  mode: "spice"
+  kernel_files:
+    - "data/ephemeris/naif0012.tls"
+    - "data/ephemeris/de440s.bsp"
+    - "data/ephemeris/moon_pa_de440_200625.bpc"
+    - "data/ephemeris/moon_de440_250416.tf"
+  frame: "MOON_ME"
+  aberration_correction: "LT+S"
+
+research:
+  enabled: true
+  require_real_dem: true
+  require_dem_provenance: true
+  minimum_spinup_cycles: 3
+
+time_range:
+  start: "2025-01-01T00:00:00Z"
+  end: "2025-01-30T12:44:03Z"
+  output_interval_s: 3600.0
+  spinup_cycles: 3
+  spinup_convergence_tolerance_K: 0.1

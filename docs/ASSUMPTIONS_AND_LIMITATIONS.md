@@ -18,22 +18,22 @@ The following 10 assumptions are programmatically registered in `core_engine/con
 | 4 | Surface Density | 1100 kg/m³ | Hayne et al., 2017 | ±200 kg/m³ |
 | 5 | Deep Density | 1800 kg/m³ | Hayne et al., 2017 | ±200 kg/m³ |
 | 6 | Surface k_contact | 7.4×10⁻⁴ W/m/K | Hayne et al., 2017 | ±50% |
-| 7 | Reflectance Model | Lambertian | User requirement | N/A |
+| 7 | Reflectance Model | Lambertian or Hapke | Configuration | Model-dependent |
 | 8 | No Dust Levitation | Excluded | User requirement | N/A |
-| 9 | No Sub-pixel Roughness | Excluded | User requirement | N/A |
+| 9 | Sub-pixel Roughness | Empirical effective emissivity | Configuration | Model-dependent |
 | 10 | Spatially Uniform Regolith | Depth-dependent only | Simplification | Unknown |
 
 ---
 
 ## 2. Known Limitations
 
-### 2.1 No Multi-Bounce IR Scattering
+### 2.1 One-Bounce Terrain IR Only
 
 **Impact: HIGH — PSR temperatures may be underestimated by ~10–20 K**
 
-The current model computes only **direct solar illumination** and does not include infrared thermal radiation exchange between terrain facets. In deep craters like Shackleton, sunlit rim surfaces emit thermal IR that illuminates/warms the permanently shadowed floor. Without this term, cold trap temperatures are biased low.
+The optional view-factor model includes one terrain IR interaction with gray-surface emission and absorption. It does not yet solve the reflected-IR radiosity system to convergence. Deep crater results can therefore retain a terrain-radiation bias.
 
-This is a planned **Milestone 4** feature requiring view-factor computation between all $N^2$ face pairs.
+Monte Carlo view factors are sparse and opt-in because their cost scales with the number of faces and rays per face.
 
 ### 2.2 No Temperature-Dependent Albedo
 
@@ -44,7 +44,7 @@ The Bond albedo is treated as spatially and thermally uniform (A = 0.12). In rea
 - Solar incidence angle (opposition surge)
 - Temperature (minor effect)
 
-A future Hapke reflectance model would address direction-dependent effects (Milestone 5).
+An optional Hapke directional-hemispherical albedo model is implemented. Its parameters remain spatially uniform and require observational calibration.
 
 ### 2.3 1D Heat Flow Assumption (Lateral Conduction Ignored)
 
@@ -77,16 +77,16 @@ The ±50% uncertainty partially accounts for this.
 
 Electrostatically charged dust particles can be lofted from the surface at the terminator (Day/night boundary) due to photoelectric charging. This may affect local albedo and surface thermal properties. The effect is excluded as it requires particle transport modeling.
 
-### 2.6 No Sub-pixel Roughness
+### 2.6 Parameterized Sub-pixel Roughness
 
 **Impact: MEDIUM for thermal emission models**
 
-Surface roughness at scales smaller than the DEM resolution (< 20 m) affects:
+Surface roughness below the DEM scale is represented through an empirical effective-emissivity correction. It does not explicitly raytrace micro-facets and therefore approximates:
 - Thermal inradiance at grazing solar angles
 - Effective emissivity (cavity effect)
 - Shadow fraction near the terminator
 
-Roughness could be parameterized using a Gaussian surface model (Bandfield et al., 2015).
+The RMS slope and cavity coefficient must be treated as uncertain calibration parameters.
 
 ### 2.7 Spatially Uniform Regolith
 
@@ -97,11 +97,15 @@ Regolith properties (k, ρ, cₚ) vary only with depth, not laterally. In realit
 - Rocky ejecta near craters has different thermal inertia
 - PSR regolith may contain water ice (higher thermal conductivity)
 
-### 2.8 No Orbital Eccentricity / Distance Correction
+### 2.8 Synthetic Ephemeris Preview
 
 **Impact: LOW**
 
-The solar constant is fixed at 1361 W/m² (1 AU). Earth-Moon distance variation (~±1.7%) causes ~±3.4% flux variation throughout the year. This is currently not modeled.
+The default offline preview uses a synthetic polar Sun and fixed solar flux.
+Research mode requires pinned NAIF DE440 kernels, the `MOON_ME` frame, `LT+S`
+correction, target latitude/longitude, UTC time, and inverse-square solar flux.
+It never falls back to the analytical rotation. Skyfield is retained only as a
+compatibility mode.
 
 ### 2.9 No Atmospheric Effects
 
@@ -145,7 +149,7 @@ The simulation models the natural thermal environment only. Spacecraft thermal i
 | Milestone | Feature | Impact on Accuracy |
 |-----------|---------|--------------------|
 | 3 | C++ BVH raytracer (pybind11) | Performance only (no accuracy change) |
-| 4 | Multi-bounce IR view factors | +10–20 K in PSRs |
+| Future | Iterative multi-bounce IR radiosity | Reduce remaining terrain-IR bias |
 | 5 | Diviner validation + Hapke reflectance | Quantified error bars |
 | Future | 3D heat conduction | ±1–3 K at shadow boundaries |
 | Future | Orbital eccentricity correction | ±3% flux |

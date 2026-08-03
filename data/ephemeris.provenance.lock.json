@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-08-03T10:49:19.784452+00:00",
+  "records": [
+    {
+      "name": "naif_leapseconds",
+      "product_id": "NAIF0012",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls",
+      "path": "data\\ephemeris\\naif0012.tls",
+      "bytes": 5257,
+      "sha256": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b"
+    },
+    {
+      "name": "jpl_de440s",
+      "product_id": "JPL-DE440S",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
+      "path": "data\\ephemeris\\de440s.bsp",
+      "bytes": 34020352,
+      "sha256": "fe5462b7ba71efcfa701041061dc2f253548f3243df707ad5b9bc17b888d4050"
+    },
+    {
+      "name": "lunar_orientation_de440",
+      "product_id": "MOON-PA-DE440-200625",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/moon_pa_de440_200625.bpc",
+      "path": "data\\ephemeris\\moon_pa_de440_200625.bpc",
+      "bytes": 12863488,
+      "sha256": "60cd55aa401ea2ea97360636f567554bfe4e37bb829f901b4460a455dfaf783f"
+    },
+    {
+      "name": "lunar_frames_de440",
+      "product_id": "MOON-DE440-250416",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/fk/satellites/moon_de440_250416.tf",
+      "path": "data\\ephemeris\\moon_de440_250416.tf",
+      "bytes": 19478,
+      "sha256": "a47c71e9c9f33796bdafb2c9d69a7ee447b6016ecad80f71cd6f3e479f9cf768"
+    }
+  ]
+}

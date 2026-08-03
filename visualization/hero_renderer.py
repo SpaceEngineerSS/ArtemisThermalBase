@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any, cast
 
 import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.patheffects as pe
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.cm import ScalarMappable
 from scipy.interpolate import griddata
@@ -72,6 +73,7 @@ def _scatter_to_grid(
     -------
     xi, yi, grid : tuple
         Regular grid coordinates and interpolated values.
+
     """
     x = face_centroids[:, 0]
     y = face_centroids[:, 1]
@@ -151,6 +153,7 @@ def render_hero_image(
     -------
     Path
         Path to the saved image.
+
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +162,9 @@ def render_hero_image(
 
     # Step 1: Interpolate scattered data onto regular grid
     xi, yi, thermal_2d = _scatter_to_grid(face_centroids, thermal_grid, grid_size)
-    _, _, illum_2d = _scatter_to_grid(face_centroids, illumination_grid, grid_size, method="nearest")
+    _, _, illum_2d = _scatter_to_grid(
+        face_centroids, illumination_grid, grid_size, method="nearest"
+    )
 
     # Step 2: Normalize and colormap the thermal data
     norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
@@ -186,11 +191,11 @@ def render_hero_image(
     fig = plt.figure(figsize=(fig_width, fig_height), facecolor=_BG_COLOR, dpi=dpi)
 
     # Main image axis (spanning most of the figure)
-    ax = fig.add_axes([0.05, 0.12, 0.88, 0.78])
+    ax = fig.add_axes((0.05, 0.12, 0.88, 0.78))
     ax.set_facecolor(_BG_COLOR)
 
     # Extent in meters
-    extent = [xi.min(), xi.max(), yi.min(), yi.max()]
+    extent = (float(xi.min()), float(xi.max()), float(yi.min()), float(yi.max()))
     ax.imshow(
         composite,
         extent=extent,
@@ -237,7 +242,7 @@ def render_hero_image(
 
     # Step 6: Horizontal colorbar
     if show_colorbar:
-        cbar_ax = fig.add_axes([0.15, 0.06, 0.70, 0.025])
+        cbar_ax = fig.add_axes((0.15, 0.06, 0.70, 0.025))
         sm = ScalarMappable(norm=norm, cmap=cmap)
         sm.set_array([])
         cbar = fig.colorbar(
@@ -248,7 +253,7 @@ def render_hero_image(
             "Surface Temperature [K]",
             color=_TEXT_COLOR, fontsize=10, fontfamily="monospace",
         )
-        cbar.outline.set_edgecolor("#333")
+        cast(Any, cbar.outline).set_edgecolor("#333")
 
     # Step 7: Scale bar
     if show_scalebar:
@@ -275,7 +280,7 @@ def render_hero_image(
 
 def _draw_scale_bar(
     ax: plt.Axes,
-    extent: list[float],
+    extent: tuple[float, float, float, float],
     bar_length_m: float = 1000.0,
     label: str = "1 km",
 ) -> None:
@@ -291,6 +296,7 @@ def _draw_scale_bar(
         Scale bar length in meters.
     label : str
         Scale bar label text.
+
     """
     x_range = extent[1] - extent[0]
     y_range = extent[3] - extent[2]
@@ -349,6 +355,7 @@ def render_from_saved_data(
     -------
     Path
         Path to the saved hero image.
+
     """
     from simulation.io_manager import load_results
 
@@ -364,9 +371,9 @@ def render_from_saved_data(
         output_path = Path(data_dir) / "hero_artemis.png"
 
     return render_hero_image(
-        face_centroids=data["face_centroids"],
-        thermal_grid=data["thermal_grid"],
-        illumination_grid=data["illumination_grid"],
+        face_centroids=np.asarray(data["face_centroids"]),
+        thermal_grid=np.asarray(data["thermal_grid"]),
+        illumination_grid=np.asarray(data["illumination_grid"]),
         output_path=output_path,
         **kwargs,
     )

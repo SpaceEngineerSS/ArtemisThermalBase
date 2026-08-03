@@ -14,17 +14,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from data_ingestion.polar_stereographic import (
-    forward,
-    forward_batch,
-    inverse,
-    inverse_batch,
-    get_shackleton_center,
-)
+from core_engine.mesh import TriangleMesh
 from core_engine.solar_disk import (
     compute_solar_solid_angle,
     generate_solar_disk_samples,
     validate_sample_weights,
+)
+from data_ingestion.polar_stereographic import (
+    forward,
+    forward_batch,
+    get_shackleton_center,
+    inverse,
+    inverse_batch,
 )
 
 # Lunar radius [m]

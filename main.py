@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -75,8 +75,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--lat",
         type=float,
-        default=-89.54,
-        help="Target latitude in degrees (default: -89.54, Shackleton)",
+        default=None,
+        help="Target latitude in degrees (default: config target)",
+    )
+    parser.add_argument(
+        "--lon",
+        type=float,
+        default=None,
+        help="Target longitude in degrees (default: config target)",
+    )
+    parser.add_argument(
+        "--start",
+        type=str,
+        default=None,
+        help="UTC start time in ISO-8601 form (default: config time_range.start)",
+    )
+    parser.add_argument(
+        "--ephemeris",
+        choices=["synthetic", "skyfield", "spice"],
+        default=None,
+        help="Solar position source (default: config ephemeris.mode)",
     )
     parser.add_argument(
         "--output",
@@ -100,8 +118,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-interval",
         type=float,
-        default=3600.0,
-        help="Save output snapshots every N seconds (default: 3600)",
+        default=None,
+        help="Save output snapshots every N seconds (default: config)",
+    )
+    parser.add_argument(
+        "--spinup-cycles",
+        type=int,
+        default=None,
+        help="Lunar cycles to run before recording output (default: config)",
     )
     parser.add_argument(
         "--dem",
@@ -152,8 +176,8 @@ def main() -> int:
     # Full simulation mode
     from core_engine.constants import load_config
     from simulation.runner import SimulationRunner
-    from visualization.plotter import generate_all_plots
     from visualization.hero_renderer import render_hero_image
+    from visualization.plotter import generate_all_plots
 
     # Load configuration
     config_path = Path(args.config)
@@ -165,7 +189,7 @@ def main() -> int:
     if args.dem:
         from data_ingestion.lola_loader import LOLALoader
         logger.info("Loading external DEM: %s", args.dem)
-        loader = LOLALoader()
+        loader = LOLALoader(require_provenance=config.research.require_dem_provenance)
         external_dem = loader.load_dem(args.dem)
         logger.info(
             "External DEM loaded: %d x %d, z=[%.1f, %.1f] m",
@@ -182,7 +206,12 @@ def main() -> int:
     )
 
     # Run simulation
-    start_time = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    start_text = args.start or config.time_range.start
+    start_time = datetime.fromisoformat(start_text.replace("Z", "+00:00"))
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=UTC)
+    else:
+        start_time = start_time.astimezone(UTC)
     logger.info(
         "Running: start=%s, duration=%.1f hrs, dt=%s s",
         start_time.isoformat(),
@@ -194,8 +223,12 @@ def main() -> int:
         start_time=start_time,
         duration_hours=args.duration,
         dt_s=args.dt,
-        output_interval_s=args.output_interval,
+        output_interval_s=args.output_interval or config.time_range.output_interval_s,
         point_source_mode=args.point_source if args.point_source else None,
+        ephemeris_mode=args.ephemeris,
+        latitude_deg=args.lat,
+        longitude_deg=args.lon,
+        spinup_cycles=args.spinup_cycles,
         save_data=True,
         output_dir=output_dir,
         external_dem=external_dem,

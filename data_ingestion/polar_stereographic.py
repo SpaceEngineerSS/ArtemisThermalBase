@@ -29,6 +29,7 @@ pole) to keep the formula sign-clean:
     y = −ρ · cos(λ)
 
 At the south pole (φ_abs = 90°), tan(0) = 0 → (x, y) = (0, 0).
+
 """
 
 from __future__ import annotations
@@ -73,6 +74,7 @@ def forward(
     x, y : tuple[float, float]
         Cartesian coordinates in meters on the tangent plane at the
         south pole.
+
     """
     phi_abs = np.radians(np.abs(lat_deg))
     lam = np.radians(lon_deg)
@@ -105,6 +107,7 @@ def forward_batch(
     -------
     x, y : tuple[np.ndarray, np.ndarray]
         Cartesian coordinates in meters. Shape: (N,) each.
+
     """
     phi_abs = np.radians(np.abs(lat_deg))
     lam = np.radians(lon_deg)
@@ -140,6 +143,7 @@ def inverse(
     -------
     lat_deg, lon_deg : tuple[float, float]
         Geodetic latitude (negative for south) and longitude in degrees.
+
     """
     rho = np.sqrt(x * x + y * y)
 
@@ -173,6 +177,7 @@ def inverse_batch(
     -------
     lat_deg, lon_deg : tuple[np.ndarray, np.ndarray]
         Geodetic coordinates in degrees. Shape: (N,) each.
+
     """
     rho = np.sqrt(x * x + y * y)
 
@@ -210,6 +215,7 @@ def get_shackleton_center(
     -------
     dict
         Keys: 'lat_deg', 'lon_deg', 'x_m', 'y_m', 'R_m'.
+
     """
     lat = -89.54
     lon = 129.78

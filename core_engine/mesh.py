@@ -1,4 +1,4 @@
-"""DEM to triangle mesh converter.
+r"""DEM to triangle mesh converter.
 
 Converts a 2D elevation grid into a triangle mesh with computed face normals,
 face areas, and face centroids. This mesh is consumed by the raytracer for
@@ -20,6 +20,7 @@ Each grid cell is split into two triangles along the diagonal:
 
 T0: (i,j), (i+1,j), (i+1,j+1)   — lower-left triangle
 T1: (i,j), (i+1,j+1), (i,j+1)   — upper-right triangle
+
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ class TriangleMesh:
         Shape: (num_triangles, 3), dtype: float64.
     metadata : dict
         Mesh statistics and provenance information.
+
     """
 
     vertices: np.ndarray
@@ -86,6 +88,7 @@ def dem_to_mesh(dem: DEMData) -> TriangleMesh:
     - Triangles: 2M × 3 × 8 bytes = 48 MB
     - Normals: 2M × 3 × 8 bytes = 48 MB
     - Total: ~144 MB
+
     """
     elev = dem.elevation  # (ny, nx)
     ny, nx = elev.shape
@@ -202,6 +205,7 @@ def _compute_face_properties(
         Triangle areas [m²], shape (num_triangles,).
     centroids : np.ndarray
         Triangle centroids [m], shape (num_triangles, 3).
+
     """
     v0 = vertices[triangles[:, 0]]  # (N, 3)
     v1 = vertices[triangles[:, 1]]  # (N, 3)

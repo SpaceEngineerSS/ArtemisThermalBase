@@ -11,15 +11,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from core_engine.mesh import dem_to_mesh
 from core_engine.raytracer import (
-    moller_trumbore,
-    ray_aabb_intersect,
     build_bvh,
     compute_shadow_map_point_source,
+    moller_trumbore,
+    ray_aabb_intersect,
 )
-from core_engine.mesh import dem_to_mesh
 from data_ingestion.synthetic_dem import DEMData
-
 
 # ===================================================================
 # FIXTURES
@@ -210,7 +209,6 @@ class TestRayAABB:
     def test_ray_through_box(self) -> None:
         """Ray passing through the center of a box."""
         origin = np.array([0.5, 0.5, 2.0], dtype=np.float64)
-        inv_dir = np.array([0.0, 0.0, -1.0], dtype=np.float64)  # 1/dir
         bbox_min = np.array([0.0, 0.0, 0.0], dtype=np.float64)
         bbox_max = np.array([1.0, 1.0, 1.0], dtype=np.float64)
 

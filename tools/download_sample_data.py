@@ -67,7 +67,6 @@ def try_download_lola(output_path: Path) -> bool:
     """
     try:
         import urllib.request
-        import tempfile
     except ImportError:
         return False
 
@@ -78,10 +77,12 @@ def try_download_lola(output_path: Path) -> bool:
             # Download to temporary file (could be very large)
             tmp_path = output_path.parent / "_download_tmp.tif"
 
-            request = urllib.request.Request(url)
+            request = urllib.request.Request(url)  # noqa: S310 - HTTPS allowlist above
             request.add_header("User-Agent", "ArtemisThermalBase/0.1")
 
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(  # noqa: S310 - validated HTTPS allowlist
+                request, timeout=30
+            ) as response:
                 total_size = int(response.headers.get("content-length", 0))
                 if total_size > 500_000_000:  # Skip files >500MB
                     logger.warning("  File too large (%.0f MB), skipping", total_size / 1e6)
@@ -198,6 +199,7 @@ def _fbm_noise_2d(
     -------
     np.ndarray
         Noise field in [-1, 1], shape (ny, nx).
+
     """
     rng = np.random.default_rng(seed)
     ny, nx = shape
@@ -266,6 +268,7 @@ def generate_semi_synthetic_shackleton(
     -------
     Path
         Path to the generated GeoTIFF.
+
     """
     R = SHACKLETON["radius_m"]
     D = SHACKLETON["depth_m"]
@@ -443,15 +446,11 @@ def main() -> int:
     success = try_download_lola(output_path)
 
     if not success:
-        logger.warning(
-            "Real data download failed. Generating semi-synthetic fallback..."
+        logger.error(
+            "Real data download failed. No synthetic fallback was written. "
+            "Use --synthetic explicitly for a non-research test fixture."
         )
-        generate_semi_synthetic_shackleton(
-            output_path=output_path,
-            grid_size=args.grid_size,
-            resolution_m=args.resolution,
-            seed=args.seed,
-        )
+        return 1
 
     return 0
 

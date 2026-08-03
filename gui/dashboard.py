@@ -18,29 +18,25 @@ Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
 
 from __future__ import annotations
 
-import json
 import math
 import sys
 from pathlib import Path
 
 import numpy as np
+import plotly.graph_objects as go
+
+try:
+    import streamlit as st
+except ImportError as exc:
+    raise ImportError(
+        "Streamlit is required for the GUI. Install with:\n"
+        "  pip install streamlit stpyvista pyarrow"
+    ) from exc
 
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-try:
-    import streamlit as st
-except ImportError:
-    raise ImportError(
-        "Streamlit is required for the GUI. Install with:\n"
-        "  pip install streamlit stpyvista pyarrow"
-    )
-
-import plotly.graph_objects as go
-import plotly.express as px
-
 
 # ===================================================================
 # PAGE CONFIG
@@ -122,13 +118,13 @@ def load_simulation_data(output_dir: str) -> dict | None:
     """Load simulation results from local files.
 
     Reads:
-    - surface_temps.npy
-    - illumination.npy
+    - thermal_grid.npy
+    - illumination_grid.npy
     - face_centroids.npy
     - face_areas.npy
-    - dem_elevation.npy
+    - dem_grid.npy
     - metadata.json
-    - probe_temps.json (if exists)
+    - probe_temps.npz (if exists)
 
     Parameters
     ----------
@@ -139,46 +135,11 @@ def load_simulation_data(output_dir: str) -> dict | None:
     -------
     dict or None
         Dictionary of loaded arrays and metadata, or None if not found.
+
     """
-    out = Path(output_dir)
-    if not out.exists():
-        return None
+    from gui.data_loader import load_dashboard_data
 
-    data = {}
-    files = {
-        "surface_temps": "surface_temps.npy",
-        "illumination": "illumination.npy",
-        "face_centroids": "face_centroids.npy",
-        "face_areas": "face_areas.npy",
-        "dem_elevation": "dem_elevation.npy",
-    }
-
-    for key, fname in files.items():
-        fpath = out / fname
-        if fpath.exists():
-            data[key] = np.load(fpath)
-
-    # Metadata
-    meta_path = out / "metadata.json"
-    if meta_path.exists():
-        with open(meta_path) as f:
-            data["metadata"] = json.load(f)
-
-    # Probe temperatures
-    probe_path = out / "probe_temps.json"
-    if probe_path.exists():
-        with open(probe_path) as f:
-            data["probe_temps"] = json.load(f)
-
-    # Sun elevations
-    sun_path = out / "sun_elevations.npy"
-    if sun_path.exists():
-        data["sun_elevations"] = np.load(sun_path)
-
-    if "surface_temps" not in data:
-        return None
-
-    return data
+    return load_dashboard_data(output_dir)
 
 
 def downsample_for_3d(centroids: np.ndarray, values: np.ndarray,
@@ -198,6 +159,7 @@ def downsample_for_3d(centroids: np.ndarray, values: np.ndarray,
     -------
     tuple
         (downsampled_centroids, downsampled_values, indices)
+
     """
     n = len(values)
     if n <= max_points:
@@ -376,18 +338,18 @@ with tab1:
                 cloud["Temperature [K]"] = t_ds
 
                 plotter = pv.Plotter(window_size=[600, 500])
-                plotter.set_background("#0d1117")
+                plotter.set_background("#0d1117")  # type: ignore[arg-type]
                 plotter.add_mesh(
                     cloud,
                     scalars="Temperature [K]",
-                    cmap=colormap,
+                    cmap=colormap,  # type: ignore[arg-type]
                     point_size=3,
                     render_points_as_spheres=True,
                     clim=[surface_T.min(), surface_T.max()],
                 )
-                plotter.view_isometric()
+                plotter.view_isometric()  # type: ignore[call-arg]
 
-                stpyvista(plotter, key="thermal_3d")
+                stpyvista(plotter, key="thermal_3d")  # type: ignore[call-arg]
 
             except ImportError:
                 st.info(

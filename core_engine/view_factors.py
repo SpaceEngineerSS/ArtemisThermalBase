@@ -27,6 +27,7 @@ References
   Polygons." SIGGRAPH 93.
 - Cohen, M.F. & Wallace, J.R. (1993). "Radiosity and Realistic Image
   Synthesis." Academic Press.
+
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ import time
 from dataclasses import dataclass
 
 import numpy as np
-from numba import njit, prange, int64, float64
+from numba import njit, prange
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class ViewFactorMatrix:
         View factor values F_ij. Shape: (nnz,).
     num_faces : int
         Number of mesh faces.
+
     """
 
     row_ptr: np.ndarray
@@ -106,6 +108,7 @@ def _cosine_weighted_hemisphere_sample(
     -------
     dx, dy, dz : float
         Direction in local frame (z = surface normal). dz > 0.
+
     """
     phi = 2.0 * np.pi * u1
     r = np.sqrt(u2)
@@ -136,6 +139,7 @@ def _local_to_world(
     -------
     np.ndarray
         Direction in world frame. Shape: (3,).
+
     """
     # Build orthonormal basis (tangent, bitangent, normal)
     # Choose reference axis that is least aligned with normal
@@ -183,6 +187,7 @@ def _compute_view_factors_mc(
     ordered_tri_indices: np.ndarray,
     tri_to_face: np.ndarray,
     num_rays: int,
+    max_neighbors: int,
     epsilon: float,
     seed: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -223,6 +228,7 @@ def _compute_view_factors_mc(
         View factor values. Shape: (total_nnz,).
     row_counts : np.ndarray
         Number of non-zero entries per face. Shape: (N,).
+
     """
     from core_engine.raytracer import _closest_hit_bvh
 
@@ -231,7 +237,7 @@ def _compute_view_factors_mc(
     # Pre-allocate per-face hit buffers
     # Max unique faces hit per source face is bounded by num_rays
     # Use a flat array: each face gets a slot of max_neighbors entries
-    max_neighbors = min(num_rays, 256)
+    max_neighbors = min(num_rays, max_neighbors)
 
     # Output arrays — flat, will be compacted later
     # Temporary per-thread storage using parallel-safe indexing
@@ -261,7 +267,7 @@ def _compute_view_factors_mc(
         local_count = np.zeros(max_neighbors, dtype=np.int64)
         n_unique = 0
 
-        for r in range(num_rays):
+        for _ray_index in range(num_rays):
             # LCG pseudo-random number generator
             rng_state = (rng_state * np.uint64(6364136223846793005)
                          + np.uint64(1442695040888963407))
@@ -353,6 +359,7 @@ def compute_ir_flux(
     -------
     Q_ir : np.ndarray
         Absorbed IR flux per face [W/m²]. Shape: (N,).
+
     """
     num_faces = len(surface_temps)
     Q_ir = np.zeros(num_faces, dtype=np.float64)
@@ -366,6 +373,41 @@ def compute_ir_flux(
         Q_ir[i] = emissivity * sigma * q
 
     return Q_ir
+
+
+@njit(cache=True, parallel=True)
+def compute_ir_flux_gray(
+    surface_temps: np.ndarray,
+    row_ptr: np.ndarray,
+    col_idx: np.ndarray,
+    vf_values: np.ndarray,
+    emissivities: np.ndarray,
+    sigma: float,
+) -> np.ndarray:
+    """Compute one-bounce gray-surface IR exchange with Kirchhoff absorption.
+
+    Source face ``j`` emits ``epsilon_j * sigma * T_j**4`` and receiver
+    ``i`` absorbs the fraction ``epsilon_i``. Reflected-IR radiosity is not
+    included; the function deliberately models one terrain interaction.
+    """
+    num_faces = len(surface_temps)
+    q_ir = np.zeros(num_faces, dtype=np.float64)
+    for i in prange(num_faces):
+        irradiation = 0.0
+        for k in range(row_ptr[i], row_ptr[i + 1]):
+            j = col_idx[k]
+            temp_j = surface_temps[j]
+            irradiation += (
+                vf_values[k]
+                * emissivities[j]
+                * sigma
+                * temp_j
+                * temp_j
+                * temp_j
+                * temp_j
+            )
+        q_ir[i] = emissivities[i] * irradiation
+    return q_ir
 
 
 # ===================================================================
@@ -382,6 +424,8 @@ def compute_view_factor_matrix(
     ordered_tri_indices: np.ndarray,
     mesh_triangles: np.ndarray,
     num_rays: int = 512,
+    max_neighbors: int = 256,
+    max_memory_mb: float = 2048.0,
     epsilon: float = 1e-10,
     seed: int = 42,
     reciprocity_tol: float = 1e-5,
@@ -418,24 +462,30 @@ def compute_view_factor_matrix(
     -------
     ViewFactorMatrix
         Sparse view factor matrix in CSR format.
+
     """
     num_faces = face_centroids.shape[0]
     num_tris = tri_verts.shape[0]
 
-    # Memory safety check
-    estimated_nnz = num_faces * 64  # Conservative estimate
-    estimated_mb = estimated_nnz * 16 / 1e6
+    # Peak allocation includes the dense temporary neighbor buffers and the
+    # worst-case compact CSR arrays that coexist during compaction.
+    effective_neighbors = min(num_rays, max_neighbors)
+    estimated_mb = (
+        num_faces * effective_neighbors * 16 * 2
+        + (num_faces + 1) * 8
+    ) / 1e6
     logger.info(
         "View factor computation: %d faces, %d rays/face, "
         "estimated memory: %.1f MB",
         num_faces, num_rays, estimated_mb,
     )
 
-    if estimated_mb > 2000:
-        logger.warning(
-            "Estimated VF memory %.0f MB exceeds 2 GB safety limit. "
-            "Consider reducing mesh resolution.",
-            estimated_mb,
+    if estimated_mb > max_memory_mb:
+        raise MemoryError(
+            "View-factor preflight requires approximately "
+            f"{estimated_mb:.0f} MB, above the configured "
+            f"{max_memory_mb:.0f} MB limit. Reduce mesh/rays/neighbors "
+            "or explicitly raise view_factors.max_memory_mb."
         )
 
     # Build triangle-to-face mapping
@@ -456,6 +506,7 @@ def compute_view_factor_matrix(
         ordered_tri_indices=ordered_tri_indices,
         tri_to_face=tri_to_face,
         num_rays=num_rays,
+        max_neighbors=max_neighbors,
         epsilon=epsilon,
         seed=seed,
     )
@@ -549,6 +600,7 @@ def _check_reciprocity(
     -------
     int
         Number of entries violating reciprocity.
+
     """
     num_faces = len(face_areas)
     violations = 0

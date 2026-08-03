@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it and the data products listed in docs/DATA_SOURCES.md."
+title: "ArtemisThermalBase"
+type: software
+authors:
+  - family-names: "Gümüş"
+    given-names: "Mehmet"
+version: "0.4.0"
+date-released: "2026-08-03"
+url: "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
+repository-code: "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
+license: MIT

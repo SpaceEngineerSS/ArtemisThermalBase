@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "evaluated_utc": "2026-08-03T10:50:00Z",
+  "observation_time_utc": "2025-01-01T00:00:00Z",
+  "target_latitude_deg": -89.67,
+  "target_longitude_deg_east": 129.78,
+  "frame": "MOON_ME",
+  "aberration_correction": "LT+S",
+  "sun_moon_distance_m": 146736959326.21414,
+  "solar_flux_w_m2": 1414.5878333886926,
+  "sun_elevation_deg": 1.7990078318595193,
+  "one_way_light_time_s": 489.46181069776657,
+  "kernels": {
+    "naif0012.tls": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b",
+    "de440s.bsp": "fe5462b7ba71efcfa701041061dc2f253548f3243df707ad5b9bc17b888d4050",
+    "moon_pa_de440_200625.bpc": "60cd55aa401ea2ea97360636f567554bfe4e37bb829f901b4460a455dfaf783f",
+    "moon_de440_250416.tf": "a47c71e9c9f33796bdafb2c9d69a7ee447b6016ecad80f71cd6f3e479f9cf768"
+  },
+  "note": "Geometry smoke check only; not an observational validation."
+}

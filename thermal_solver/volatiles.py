@@ -37,6 +37,7 @@ References
   asteroids." ApJ, 682, 697-705.
 - Andreas, E.L. (2007). "New estimates for the sublimation rate
   for ice on the Moon." Icarus, 186, 24-30.
+
 """
 
 from __future__ import annotations
@@ -98,6 +99,7 @@ def sublimation_rate_log10(T: float) -> float:
     float
         log₁₀ of sublimation rate [kg/m²/s].
         Returns -100.0 (effectively zero) for T < 1 K.
+
     """
     if T < 1.0:
         return -100.0
@@ -118,6 +120,7 @@ def sublimation_rate(T: float) -> float:
     float
         Sublimation mass flux [kg/m²/s].
         Returns 0.0 for T < 1 K.
+
     """
     if T < 1.0:
         return 0.0
@@ -146,6 +149,7 @@ def sublimation_rate_hertz_knudsen(T: float) -> float:
     -------
     float
         Sublimation mass flux [kg/m²/s].
+
     """
     if T < 1.0:
         return 0.0
@@ -190,6 +194,7 @@ def ice_stability_class(T: float) -> int:
         - 0 = STABLE (T < 110 K, retains ice for > 1 Gyr)
         - 1 = MARGINAL (110 K ≤ T < 115 K, retains for ~100 Myr)
         - 2 = UNSTABLE (T ≥ 115 K, ice sublimates rapidly)
+
     """
     if T < _THRESHOLD_STABLE:
         return STABILITY_STABLE
@@ -214,6 +219,7 @@ def ice_retention_timescale(T: float, ice_thickness_m: float = 1.0) -> float:
     -------
     float
         Retention timescale [years]. Returns inf for T < 40 K.
+
     """
     if T < 40.0:
         return np.inf
@@ -251,6 +257,7 @@ def compute_cold_trap_map(
     stability : np.ndarray
         Stability class per face. Shape: (N,).
         0 = STABLE, 1 = MARGINAL, 2 = UNSTABLE.
+
     """
     N = len(surface_temps)
     stability = np.empty(N, dtype=np.int64)
@@ -276,6 +283,7 @@ def compute_sublimation_map(
     -------
     rates : np.ndarray
         Sublimation rate per face [kg/m²/s]. Shape: (N,).
+
     """
     N = len(surface_temps)
     rates = np.empty(N, dtype=np.float64)

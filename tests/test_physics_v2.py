@@ -11,8 +11,6 @@ Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
 from __future__ import annotations
 
 import numpy as np
-import pytest
-
 
 # ===================================================================
 # TEST 1: Solar Flux Inverse-Square Law
@@ -114,7 +112,6 @@ class TestViewFactorProperties:
         """
         # Simulate a simple VF matrix (3 faces)
         row_ptr = np.array([0, 2, 3, 5], dtype=np.int64)
-        col_idx = np.array([1, 2, 0, 0, 1], dtype=np.int64)
         values = np.array([0.3, 0.2, 0.25, 0.15, 0.35], dtype=np.float64)
 
         N = 3
@@ -244,8 +241,8 @@ class TestColdTrapStability:
     def test_stable_below_110K(self):
         """T < 110 K → stable (class 0)."""
         from thermal_solver.volatiles import (
-            ice_stability_class,
             STABILITY_STABLE,
+            ice_stability_class,
         )
 
         assert ice_stability_class(50.0) == STABILITY_STABLE
@@ -255,8 +252,8 @@ class TestColdTrapStability:
     def test_marginal_110_to_115K(self):
         """110 K ≤ T < 115 K → marginal (class 1)."""
         from thermal_solver.volatiles import (
-            ice_stability_class,
             STABILITY_MARGINAL,
+            ice_stability_class,
         )
 
         assert ice_stability_class(110.0) == STABILITY_MARGINAL
@@ -266,8 +263,8 @@ class TestColdTrapStability:
     def test_unstable_above_115K(self):
         """T ≥ 115 K → unstable (class 2)."""
         from thermal_solver.volatiles import (
-            ice_stability_class,
             STABILITY_UNSTABLE,
+            ice_stability_class,
         )
 
         assert ice_stability_class(115.0) == STABILITY_UNSTABLE

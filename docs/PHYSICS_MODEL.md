@@ -78,7 +78,7 @@ $$
 This couples the surface energy balance to the subsurface heat equation (Section 4).
 
 > [!NOTE]
-> **Current simplification**: $Q_{\text{IR},i} = 0$ (no multi-bounce infrared scattering between terrain facets). This is a planned Milestone 4 feature. PSR temperatures may be underestimated by ~10–20 K due to this omission (Paige et al., 2010).
+> **Current simplification**: optional sparse Monte Carlo view factors model one terrain IR interaction. Reflected-IR radiosity is not iterated to convergence, so a multi-bounce terrain-radiation bias can remain.
 
 ---
 
@@ -246,7 +246,7 @@ $$
 | Number of layers | $N$ | 100 |
 | Maximum depth | $z_{\max}$ | $\sim$ 2.0 m |
 
-The thermal skin depth for a 29.5-day lunar cycle is $\sim$ 0.3 m, so the 2 m grid depth is sufficient for thermal isolation.
+The thermal skin depth for a 29.5-day lunar cycle is $\sim$ 0.3 m. The default stretched grid reaches ~6.19 m, providing a deep lower boundary.
 
 ---
 
@@ -396,7 +396,7 @@ Stability of the Thomas algorithm is guaranteed by diagonal dominance of our Cra
 
 ## 8. Regolith Thermophysical Properties
 
-All properties follow the **Hayne et al. (2017)** model, validated against LRO Diviner observations.
+The property parameterization follows **Hayne et al. (2017)**. End-to-end validation of this implementation against LRO Diviner observations remains pending.
 
 ### Thermal Conductivity
 
@@ -460,11 +460,12 @@ Origin at the mean elevation of the DEM grid. The **polar stereographic projecti
 
 ### Sun Direction Vector
 
-The sun direction $\hat{s}$ is computed via the **Skyfield** ephemeris library using JPL DE421 planetary ephemerides. The computation chain:
-
-1. Skyfield computes geocentric sun position
-2. Transform to selenocentric coordinates
-3. Apply polar stereographic projection to get $\hat{s}$ in the local DEM frame
+In research `spice` mode, the Moon-to-Sun vector is evaluated from pinned NAIF
+DE440 kernels directly in the lunar Mean Earth (`MOON_ME`) body-fixed frame with
+`LT+S` correction. A local north/east/up tangent rotation is then applied at the
+configured planetocentric latitude and positive-east longitude. Missing kernels
+are fatal and there is no analytical fallback. `skyfield` remains a compatibility
+mode; the default offline preview uses the explicitly labeled synthetic polar Sun.
 
 ---
 

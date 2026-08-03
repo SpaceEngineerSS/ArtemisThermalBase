@@ -13,6 +13,7 @@ References
   JGR Planets, 122, 2371-2400.
 - Hemingway, B.S., et al. (1973). "Thermophysical properties of lunar
   surface materials." USGS Professional Paper 727.
+
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ def build_property_functions(
         cp(T) → float64. Specific heat capacity [J/kg/K].
     density : callable
         rho(z) → float64. Bulk density [kg/m³].
+
     """
     # Extract all parameters as plain floats
     k_c_surf = regolith.conductivity_surface.k_contact
@@ -94,6 +96,7 @@ def build_property_functions(
         -------
         float
             Thermal conductivity [W/m/K].
+
         """
         # Clamp temperature to avoid negative k at T=0
         T_safe = max(T, 1.0)
@@ -123,6 +126,7 @@ def build_property_functions(
         -------
         float
             Specific heat capacity [J/kg/K].
+
         """
         # Clamp temperature to avoid domain errors in sqrt
         T_safe = max(T, 1.0)
@@ -148,6 +152,7 @@ def build_property_functions(
         -------
         float
             Bulk density [kg/m³].
+
         """
         return rho_d - (rho_d - rho_s) * np.exp(-z / H)
 
@@ -182,6 +187,7 @@ def compute_property_profiles(
     -------
     dict[str, np.ndarray]
         Dictionary with 'k', 'cp', 'rho' arrays. Shape: (N+1,) each.
+
     """
     N = len(z_grid)
     k_arr = np.empty(N, dtype=np.float64)

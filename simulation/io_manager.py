@@ -66,6 +66,7 @@ def save_results(
     -------
     list[Path]
         Paths to all saved files.
+
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -126,6 +127,7 @@ def load_results(
         Keys: 'thermal_grid', 'illumination_grid', 'dem_grid',
         'face_centroids', 'face_areas', 'sun_elevations',
         'probe_temps', 'metadata'.
+
     """
     output_dir = Path(output_dir)
 
@@ -163,7 +165,7 @@ def load_results(
     # Metadata
     meta_path = output_dir / "metadata.json"
     if meta_path.exists():
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             data["metadata"] = json.load(f)
     else:
         data["metadata"] = {}

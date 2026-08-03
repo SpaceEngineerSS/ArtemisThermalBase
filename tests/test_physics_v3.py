@@ -15,8 +15,6 @@ from __future__ import annotations
 import math
 
 import numpy as np
-import pytest
-
 
 # ===================================================================
 # TEST 1: Henyey-Greenstein Phase Function
@@ -28,7 +26,8 @@ class TestHenyeyGreensteinPhase:
 
     def test_backward_peak(self):
         """Phase function should peak near g=0 (opposition, cos_g=+1)
-        for c=0.70 (70% backward scattering)."""
+        for c=0.70 (70% backward scattering).
+        """
         from core_engine.reflectance import henyey_greenstein_double
 
         # cos_g = +1 means g = 0° (opposition/backscatter direction)
@@ -132,7 +131,7 @@ class TestHFunction:
 
         H_low = h_function(0.5, 0.1)
         H_high = h_function(0.5, 0.9)
-        assert H_high > H_low, f"H not increasing with w"
+        assert H_high > H_low, "H not increasing with w"
 
     def test_always_geq_1(self):
         """H(x, w) ≥ 1 for all valid inputs."""

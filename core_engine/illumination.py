@@ -22,21 +22,20 @@ The extended-source mode fires N shadow rays per face, where N is the
 number of solar disk samples. For 39K faces × 64 samples = ~2.5M ray
 queries per timestep. The BVH acceleration keeps this tractable (~1-2
 minutes on modern CPUs with Numba parallel).
+
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
 
 import numpy as np
 
 from core_engine.mesh import TriangleMesh
 from core_engine.raytracer import (
     build_bvh,
-    compute_shadow_map_extended_source,
+    compute_extended_source_flux_factors,
     compute_shadow_map_point_source,
 )
 from core_engine.solar_disk import generate_solar_disk_samples
@@ -67,9 +66,11 @@ class IlluminationResult:
         'point_source' or 'extended_source'.
     stats : dict[str, float]
         Summary statistics: mean illumination, shadow fraction, etc.
+
     """
 
     illumination: np.ndarray
+    projected_solar_factor: np.ndarray
     sun_dir: np.ndarray
     sun_elevation_deg: float
     num_samples: int
@@ -105,6 +106,7 @@ class IlluminationEngine:
         Raytracer intersection epsilon.
     max_leaf_triangles : int
         BVH leaf capacity.
+
     """
 
     def __init__(
@@ -148,6 +150,7 @@ class IlluminationEngine:
         -------
         tuple[np.ndarray, np.ndarray, np.ndarray]
             (bvh_nodes, tri_verts, ordered_indices)
+
         """
         return self._bvh_nodes, self._tri_verts, self._ordered_indices
 
@@ -170,6 +173,7 @@ class IlluminationEngine:
         -------
         IlluminationResult
             Per-face illumination fractions and metadata.
+
         """
         # Normalize sun direction
         sun_dir = np.asarray(sun_dir, dtype=np.float64)
@@ -189,7 +193,12 @@ class IlluminationEngine:
         )))
 
         # Sun below horizon → everything is in shadow
-        if sun_elevation_deg <= 0.0:
+        horizon_cutoff_deg = (
+            0.0
+            if use_point_source
+            else -float(np.degrees(self._solar_angular_radius_rad))
+        )
+        if sun_elevation_deg <= horizon_cutoff_deg:
             num_faces = self._mesh.face_centroids.shape[0]
             logger.info(
                 "Sun below horizon (elevation=%.2f°). All faces shadowed.",
@@ -197,6 +206,7 @@ class IlluminationEngine:
             )
             return IlluminationResult(
                 illumination=np.zeros(num_faces, dtype=np.float64),
+                projected_solar_factor=np.zeros(num_faces, dtype=np.float64),
                 sun_dir=sun_dir,
                 sun_elevation_deg=sun_elevation_deg,
                 num_samples=0,
@@ -211,10 +221,13 @@ class IlluminationEngine:
 
         if use_point_source:
             illumination = self._compute_point_source(sun_dir)
+            projected_solar_factor = illumination * np.maximum(
+                0.0, self._mesh.face_normals @ sun_dir
+            )
             mode_str = "point_source"
             n_samples = 1
         else:
-            illumination = self._compute_extended_source(sun_dir)
+            illumination, projected_solar_factor = self._compute_extended_source(sun_dir)
             mode_str = "extended_source"
             n_samples = self._num_samples
 
@@ -233,6 +246,7 @@ class IlluminationEngine:
 
         return IlluminationResult(
             illumination=illumination,
+            projected_solar_factor=projected_solar_factor,
             sun_dir=sun_dir,
             sun_elevation_deg=sun_elevation_deg,
             num_samples=n_samples,
@@ -252,7 +266,9 @@ class IlluminationEngine:
             self._epsilon,
         )
 
-    def _compute_extended_source(self, sun_dir: np.ndarray) -> np.ndarray:
+    def _compute_extended_source(
+        self, sun_dir: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Extended-source illumination with solar disk sampling."""
         # Generate solar disk sample directions
         sun_samples = generate_solar_disk_samples(
@@ -261,7 +277,7 @@ class IlluminationEngine:
             self._num_samples,
         )
 
-        return compute_shadow_map_extended_source(
+        return compute_extended_source_flux_factors(
             self._mesh.face_centroids,
             self._mesh.face_normals,
             sun_samples,

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib
 
@@ -20,8 +21,9 @@ matplotlib.use("Agg")  # Non-interactive backend for headless rendering
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import Normalize
-from matplotlib.tri import Triangulation
+
+if TYPE_CHECKING:
+    from simulation.runner import SimulationResults
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,7 @@ def plot_illumination_map(
     -------
     matplotlib.figure.Figure
         The generated figure.
+
     """
     fig, ax = plt.subplots(1, 1, figsize=(10, 8), facecolor="#1a1a2e")
     ax.set_facecolor("#1a1a2e")
@@ -141,6 +144,7 @@ def plot_thermal_map(
     -------
     matplotlib.figure.Figure
         The generated figure.
+
     """
     fig, ax = plt.subplots(1, 1, figsize=(10, 8), facecolor="#0f0f1a")
     ax.set_facecolor("#0f0f1a")
@@ -210,6 +214,7 @@ def plot_time_series(
     -------
     matplotlib.figure.Figure
         The generated figure.
+
     """
     fig, ax = plt.subplots(1, 1, figsize=(12, 6), facecolor="#0f0f1a")
     ax.set_facecolor("#0f0f1a")
@@ -273,6 +278,7 @@ def plot_sun_elevation(
     -------
     matplotlib.figure.Figure
         The generated figure.
+
     """
     fig, ax = plt.subplots(1, 1, figsize=(12, 4), facecolor="#0f0f1a")
     ax.set_facecolor("#0f0f1a")
@@ -315,7 +321,7 @@ def plot_sun_elevation(
 
 
 def generate_all_plots(
-    results: "SimulationResults",
+    results: SimulationResults,
     output_dir: Path | str = "output",
     dpi: int = _DPI,
 ) -> list[Path]:
@@ -334,9 +340,9 @@ def generate_all_plots(
     -------
     list[Path]
         Paths to all generated plot files.
+
     """
     # Lazy import to avoid circular
-    from simulation.runner import SimulationResults
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -451,8 +457,9 @@ def plot_ice_stability_map(
     References
     ----------
     Powell, T.M. & Rubanenko, L. (2020). Cold trap stability thresholds.
+
     """
-    from matplotlib.colors import ListedColormap, BoundaryNorm
+    from matplotlib.colors import BoundaryNorm, ListedColormap
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 8), facecolor="#0a0a14")
     ax.set_facecolor("#0a0a14")

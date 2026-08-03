@@ -31,6 +31,7 @@ Fibonacci Spiral on a spherical cap of angular radius θ_sun:
 
 Solid angle of the solar disk:
     Ω_sun = 2π(1 − cos θ_sun) ≈ π sin²(θ_sun) ≈ 6.79 × 10⁻⁵ sr
+
 """
 
 from __future__ import annotations
@@ -87,6 +88,7 @@ def generate_solar_disk_samples(
     ------
     ValueError
         If num_samples < 1 or angular_radius_rad ≤ 0.
+
     """
     if num_samples < 1:
         raise ValueError(f"num_samples must be ≥ 1, got {num_samples}")
@@ -156,6 +158,7 @@ def _rotation_z_to_direction(target_dir: np.ndarray) -> np.ndarray:
     -------
     R : np.ndarray
         3×3 rotation matrix. Shape: (3, 3).
+
     """
     z_axis = np.array([0.0, 0.0, 1.0])
     dot = np.dot(z_axis, target_dir)
@@ -220,6 +223,7 @@ def compute_solar_solid_angle(
     -------
     float
         Solid angle in steradians.
+
     """
     return 2.0 * np.pi * (1.0 - np.cos(angular_radius_rad))
 
@@ -260,6 +264,7 @@ def validate_sample_weights(
         - 'weight_per_sample' : 1/N
         - 'total_weight' : should be 1.0
         - 'passed' : bool
+
     """
     omega_exact = compute_solar_solid_angle(angular_radius_rad)
     omega_per_sample = omega_exact / num_samples

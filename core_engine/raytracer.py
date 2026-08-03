@@ -25,16 +25,15 @@ References
   Intersection." J. Graphics Tools, 2(1), 21-28.
 - Wald, I. (2007). "On fast Construction of SAH-based Bounding Volume
   Hierarchies." Proc. IEEE Symp. Interactive Ray Tracing, pp. 33-40.
+
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import numpy as np
-import numba as nb
-from numba import njit, prange, float64, int64, boolean
+from numba import boolean, float64, int64, njit, prange
 
 from core_engine.mesh import TriangleMesh
 
@@ -104,6 +103,7 @@ def moller_trumbore(
     ``fastmath=False`` is CRITICAL to prevent the compiler from reordering
     floating-point operations, which would break the epsilon comparisons
     and cause ray leakage at triangle edges — fatal for PSR accuracy.
+
     """
     # Edge vectors
     e1_x = v1[0] - v0[0]
@@ -194,6 +194,7 @@ def ray_aabb_intersect(
     -------
     bool
         True if the ray intersects the AABB within [0, t_max_limit].
+
     """
     t_min = 0.0
     t_max = t_max_limit
@@ -255,6 +256,7 @@ def _shadow_ray_bvh(
     -------
     bool
         True if the ray is occluded (hits any triangle).
+
     """
     # Precompute inverse direction (handles zeros via IEEE 754 inf)
     inv_dir = np.empty(3, dtype=np.float64)
@@ -352,6 +354,7 @@ def _closest_hit_bvh(
         Index of closest hit triangle, or -1 if no hit.
     closest_t : float
         Parametric distance to closest hit, or INF if no hit.
+
     """
     inv_dir = np.empty(3, dtype=np.float64)
     for axis in range(3):
@@ -454,6 +457,7 @@ def compute_shadow_map_point_source(
     illumination : np.ndarray
         Illumination fraction per face: 1.0 = lit, 0.0 = shadowed.
         Shape: (num_faces,).
+
     """
     num_faces = face_centroids.shape[0]
     illumination = np.zeros(num_faces, dtype=np.float64)
@@ -525,6 +529,7 @@ def compute_shadow_map_extended_source(
     -------
     illumination : np.ndarray
         Illumination fraction per face, in [0, 1]. Shape: (num_faces,).
+
     """
     num_faces = face_centroids.shape[0]
     num_samples = sun_samples.shape[0]
@@ -536,6 +541,10 @@ def compute_shadow_map_extended_source(
         visible_count = 0
 
         for s in range(num_samples):
+            # The Moon occults samples below the global terrain horizon.
+            if sun_samples[s, 2] <= 0.0:
+                continue
+
             # Check if face is oriented toward this sun sample
             cos_theta = (
                 face_normals[i, 0] * sun_samples[s, 0]
@@ -563,6 +572,60 @@ def compute_shadow_map_extended_source(
         illumination[i] = float(visible_count) * inv_samples
 
     return illumination
+
+
+@njit(cache=True, parallel=True, fastmath=False)
+def compute_extended_source_flux_factors(
+    face_centroids: np.ndarray,
+    face_normals: np.ndarray,
+    sun_samples: np.ndarray,
+    bvh_nodes: np.ndarray,
+    tri_verts: np.ndarray,
+    ordered_tri_indices: np.ndarray,
+    epsilon: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return visible-disk fraction and disk-integrated projected cosine.
+
+    The projected factor is ``mean(max(0, n·s) * visibility(s))`` over
+    equal-solid-angle solar samples.  This is the quantity that multiplies
+    irradiance; using the centre-ray cosine times visible fraction is biased
+    near the horizon and on steep facets.
+    """
+    num_faces = face_centroids.shape[0]
+    num_samples = sun_samples.shape[0]
+    inv_samples = 1.0 / float(num_samples)
+    illumination = np.zeros(num_faces, dtype=np.float64)
+    projected_factor = np.zeros(num_faces, dtype=np.float64)
+
+    for i in prange(num_faces):
+        visible_count = 0
+        projected_sum = 0.0
+        origin = np.empty(3, dtype=np.float64)
+        origin[0] = face_centroids[i, 0] + face_normals[i, 0] * epsilon * 100.0
+        origin[1] = face_centroids[i, 1] + face_normals[i, 1] * epsilon * 100.0
+        origin[2] = face_centroids[i, 2] + face_normals[i, 2] * epsilon * 100.0
+
+        for s in range(num_samples):
+            if sun_samples[s, 2] <= 0.0:
+                continue
+            cos_theta = (
+                face_normals[i, 0] * sun_samples[s, 0]
+                + face_normals[i, 1] * sun_samples[s, 1]
+                + face_normals[i, 2] * sun_samples[s, 2]
+            )
+            if cos_theta <= 0.0:
+                continue
+            sun_dir = sun_samples[s]
+            if not _shadow_ray_bvh(
+                origin, sun_dir, bvh_nodes, tri_verts, ordered_tri_indices, epsilon
+            ):
+                visible_count += 1
+                projected_sum += cos_theta
+
+        illumination[i] = float(visible_count) * inv_samples
+        projected_factor[i] = projected_sum * inv_samples
+
+    return illumination, projected_factor
 
 
 # ===================================================================
@@ -595,6 +658,7 @@ def build_bvh(
         Shape: (num_triangles, 3, 3), dtype: float64.
     ordered_indices : np.ndarray
         Triangle indices in BVH leaf order. Shape: (num_triangles,), dtype: int64.
+
     """
     num_triangles = mesh.triangles.shape[0]
     logger.info(
@@ -741,6 +805,7 @@ def _find_best_split_sah(
         Best split axis (0, 1, 2) or -1 if no beneficial split.
     best_split : float
         Best split position along the axis.
+
     """
     count = end - start
     sub_idx = indices[start:end]
@@ -827,6 +892,7 @@ def _surface_area(bbox_min: np.ndarray, bbox_max: np.ndarray) -> float:
     -------
     float
         Surface area.
+
     """
     d = bbox_max - bbox_min
     return 2.0 * (d[0] * d[1] + d[1] * d[2] + d[2] * d[0])
@@ -861,6 +927,7 @@ def _partition_indices(
     -------
     int
         Partition point (first index of right partition).
+
     """
     left = start
     right = end - 1
@@ -911,6 +978,7 @@ def compute_illumination(
     -------
     illumination : np.ndarray
         Per-face illumination fraction [0, 1]. Shape: (num_faces,).
+
     """
     # Build BVH if not provided
     if bvh_data is None:

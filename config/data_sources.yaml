@@ -1,0 +1,30 @@
+schema_version: 1
+
+# All automatic downloads are restricted to official NASA/JPL/USGS hosts.
+sources:
+  naif_leapseconds:
+    group: ephemeris
+    product_id: NAIF0012
+    url: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls
+    path: data/ephemeris/naif0012.tls
+  jpl_de440s:
+    group: ephemeris
+    product_id: JPL-DE440S
+    url: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp
+    path: data/ephemeris/de440s.bsp
+  lunar_orientation_de440:
+    group: ephemeris
+    product_id: MOON-PA-DE440-200625
+    url: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/moon_pa_de440_200625.bpc
+    path: data/ephemeris/moon_pa_de440_200625.bpc
+  lunar_frames_de440:
+    group: ephemeris
+    product_id: MOON-DE440-250416
+    url: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/fk/satellites/moon_de440_250416.tf
+    path: data/ephemeris/moon_de440_250416.tf
+  lola_global_118m:
+    group: topography
+    product_id: Lunar_LRO_LOLA_Global_LDEM_118m_Mar2014
+    url: https://planetarymaps.usgs.gov/mosaic/Lunar_LRO_LOLA_Global_LDEM_118m_Mar2014.tif
+    path: data/raw/Lunar_LRO_LOLA_Global_LDEM_118m_Mar2014.tif
+    note: The official source is about 8 GB; prepare_lola_dem.py can read a remote window.

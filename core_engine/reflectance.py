@@ -42,6 +42,7 @@ References
   photometric model." *Icarus*, 215, 83-100.
 
 Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
+
 """
 
 from __future__ import annotations
@@ -50,7 +51,6 @@ import math
 
 import numpy as np
 from numba import njit, prange
-
 
 # ===================================================================
 # DEFAULT PARAMETERS — Mature Highland Regolith
@@ -102,6 +102,7 @@ def henyey_greenstein_double(cos_g: float, b: float, c: float) -> float:
     where P_HG is the single Henyey-Greenstein function:
 
         P_HG(g, b) = (1 − b²) / (1 + 2b·cos(g) + b²)^(3/2)
+
     """
     b2 = b * b
 
@@ -156,6 +157,7 @@ def shadow_hiding_opposition(cos_g: float, B_SH0: float, h_s: float) -> float:
 
     At g = 0: B_SH = B_SH0.
     At g >> h_s: B_SH → 0.
+
     """
     # Recover g from cos_g, clamped for numerical safety
     cos_g_safe = max(-1.0, min(1.0, cos_g))
@@ -203,6 +205,7 @@ def h_function(x: float, w: float) -> float:
 
     For w = 0: H(x) = 1 (no multiple scattering).
     For w → 1: H(x) → (1 + 2x) / 1 = 1 + 2x (maximum).
+
     """
     gamma = math.sqrt(max(1.0 - w, 0.0))
     denom = 1.0 + 2.0 * x * gamma
@@ -255,6 +258,7 @@ def hapke_reflectance(
     -------
     float
         Bidirectional reflectance r(i, e, g) [sr⁻¹].
+
     """
     mu0 = max(cos_i, 1e-10)  # avoid singularity at grazing
     mu = max(cos_e, 1e-10)
@@ -318,6 +322,7 @@ def _integrate_adh_single(
     -------
     float
         Directional-hemispherical albedo A_DH. Range: [0, 1].
+
     """
     mu0 = max(cos_i, 1e-10)
     sin_i = math.sqrt(max(1.0 - mu0 * mu0, 0.0))
@@ -381,6 +386,7 @@ def directional_hemispherical_albedo(
     -------
     float
         Directional-hemispherical albedo A_DH ∈ [0, 1].
+
     """
     # Use moderate resolution for the hemisphere integral
     # 32×64 gives ~0.5% accuracy (validated against Hapke tables)
@@ -411,6 +417,7 @@ def compute_adh_array(
     -------
     np.ndarray
         Directional-hemispherical albedo per face. Shape: (num_faces,).
+
     """
     n = len(cos_incidence)
     result = np.empty(n, dtype=np.float64)

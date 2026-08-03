@@ -40,7 +40,7 @@ Informational only. Logged for reproducibility and included in output metadata f
 ```yaml
 target:
   name: "Shackleton Crater"
-  latitude_deg: -89.54
+  latitude_deg: -89.67
   longitude_deg: 129.78
   diameter_km: 21.0
   depth_km: 4.2
@@ -208,7 +208,7 @@ solver:
       growth_ratio: 1.07
       num_layers: 100
     time:
-      dt_s: 120.0                    # [s] = 2 minutes
+      dt_s: 300.0                    # [s] = 5 minutes (preview default)
       max_dt_s: 3600.0               # [s]
     newton:
       max_iterations: 20
@@ -230,7 +230,7 @@ solver:
 - **Increasing `dt_s`** speeds up the simulation but may cause temporal discretization errors during fast thermal transients (e.g., sunrise/sunset). The Crank-Nicolson scheme is unconditionally stable, but accuracy degrades with large time steps. For accurate penumbra thermal transients, use `dt ≤ 300 s`.
 - **Decreasing `dz_surface_m`** improves resolution of the thermal skin depth but increases the number of layers and computation time.
 - **`growth_ratio`** close to 1.0 gives near-uniform spacing (expensive but accurate). Values > 1.2 may under-resolve the thermal wave at intermediate depths.
-- **`num_layers = 100`** with `growth_ratio = 1.07` gives a grid ~2 m deep, sufficient for thermal isolation.
+- **`num_layers = 100`** with `growth_ratio = 1.07` and 0.5 mm surface spacing gives a grid ~6.19 m deep.
 
 ### 7.2 Raytracer
 
@@ -257,18 +257,18 @@ solver:
 
 ```yaml
   illumination:
-    solar_disk_samples: 64
+    solar_disk_samples: 16
     sampling_method: "fibonacci"
     point_source_mode: false
 ```
 
 | Parameter | Type | Units | Valid Range | Default |
 |-----------|------|-------|-------------|---------|
-| `solar_disk_samples` | int | — | [1, 256] | 64 |
+| `solar_disk_samples` | int | — | [1, 256] | 16 |
 | `point_source_mode` | bool | — | — | false |
 
 **Physical implications**:
-- **`solar_disk_samples`** controls the Monte Carlo resolution of penumbra. 64 samples gives ~1.5% noise at shadow edges. 32 is acceptable for fast previews; 128+ for publication quality.
+- **`solar_disk_samples`** controls penumbra resolution. The runnable preview uses 16; 64 or more should be selected for research convergence studies.
 - **`point_source_mode = true`** disables penumbra entirely (binary shadow, ~64× faster). Useful for testing but produces unrealistic sharp shadow boundaries.
 
 ---
@@ -281,7 +281,7 @@ synthetic_dem:
   radius_m: 10500.0
   depth_m: 4200.0
   rim_height_m: 300.0
-  grid_resolution_m: 20.0
+  grid_resolution_m: 200.0
   domain_padding_m: 3000.0
   seed: 42
 ```
@@ -292,12 +292,12 @@ synthetic_dem:
 | `radius_m` | float | m | [100, 100000] | 10500 |
 | `depth_m` | float | m | [10, 10000] | 4200 |
 | `rim_height_m` | float | m | [0, 2000] | 300 |
-| `grid_resolution_m` | float | m/px | [1, 500] | 20 |
+| `grid_resolution_m` | float | m/px | [1, 500] | 200 |
 | `seed` | int | — | — | 42 |
 
 **Physical implications**:
 - **Smaller `radius_m`** → faster simulation (fewer mesh triangles) but may not capture large-scale shadow geometry.
-- **`grid_resolution_m`** controls the DEM pixel size and thus the number of triangles. At 20 m/px a 21 km crater produces ~500k triangles. At 10 m/px the count quadruples.
+- **`grid_resolution_m`** controls the DEM pixel size and thus the number of triangles. With the default padding, 200 m/px produces 36,450 triangles while 20 m/px produces 3,645,000. Halving pixel size approximately quadruples the face count.
 - **`seed`** ensures reproducible synthetic terrain noise. Change for ensemble simulations.
 
 ---

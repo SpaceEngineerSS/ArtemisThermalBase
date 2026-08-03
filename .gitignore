@@ -39,6 +39,14 @@ data/*.BSP
 data/*.npy
 data/*.npz
 data/_download_tmp.*
+data/**/*.tif
+data/**/*.TIF
+data/**/*.bsp
+data/**/*.BSP
+data/**/*.bpc
+data/**/*.tls
+data/**/*.tf
+data/**/*.part
 
 # --- Simulation output ---
 output/

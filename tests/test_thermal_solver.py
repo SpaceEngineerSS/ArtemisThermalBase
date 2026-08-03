@@ -26,11 +26,9 @@ from core_engine.constants import (
 from thermal_solver.crank_nicolson import (
     CrankNicolsonSolver,
     ThermalColumn,
-    create_thermal_column,
     _thomas_solve,
-    _step_crank_nicolson,
+    create_thermal_column,
 )
-
 
 # ===================================================================
 # FIXTURES
@@ -201,9 +199,6 @@ class TestEnergyConservation:
 
         # Simulated period: 3 lunar days to let transients die
         period_s = config.lunar.synodic_period_s
-        total_time = 3.0 * period_s
-        num_steps = int(total_time / dt)
-
         # Run first 2 periods to reach quasi-steady state (don't track energy)
         warmup_steps = int(2.0 * period_s / dt)
         omega = 2.0 * np.pi / period_s
@@ -363,8 +358,6 @@ class TestThermalWave:
         delta = np.sqrt(2.0 * kappa / omega)
 
         T_mean = 200.0
-        delta_T = 50.0  # amplitude of surface oscillation
-
         # Initialize with mean temperature
         col.T[:] = T_mean
 

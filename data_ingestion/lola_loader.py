@@ -18,6 +18,7 @@ References
 - Smith et al. (2017). "Summary of the results from the Lunar Orbiter
   Laser Altimeter after seven years." Icarus, 283, 70-91.
 - LOLA PDS Archive: https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/
+
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ class LOLALoader:
     center_elevation : bool
         If True, subtract the mean elevation so the DEM is centered
         around z=0.  This improves numerical conditioning.
+
     """
 
     NODATA_DEFAULT = -3.4028235e+38
@@ -68,10 +70,12 @@ class LOLALoader:
         nodata_threshold: float = -1.0e+30,
         fill_nodata: bool = True,
         center_elevation: bool = True,
+        require_provenance: bool = False,
     ) -> None:
         self._nodata_threshold = nodata_threshold
         self._fill_nodata = fill_nodata
         self._center_elevation = center_elevation
+        self._require_provenance = require_provenance
 
     def load_dem(
         self,
@@ -103,6 +107,7 @@ class LOLALoader:
             If the file does not exist.
         ValueError
             If the file contains no valid elevation data.
+
         """
         from data_ingestion.synthetic_dem import DEMData
 
@@ -111,6 +116,12 @@ class LOLALoader:
 
         if not file_path.exists():
             raise FileNotFoundError(f"DEM file not found: {file_path}")
+
+        provenance = None
+        if self._require_provenance:
+            from data_ingestion.provenance import verify_provenance
+
+            provenance = verify_provenance(file_path)
 
         logger.info("Loading LOLA DEM: %s", file_path)
 
@@ -127,6 +138,27 @@ class LOLALoader:
             )
             logger.info("  NoData value: %s", src.nodata)
 
+            if src.crs is not None and src.crs.is_geographic:
+                raise ValueError(
+                    "Geographic DEM coordinates are angular degrees, not metres. "
+                    "Reproject the raster to a lunar metric projected CRS before loading."
+                )
+            if abs(src.transform.b) > 1e-12 or abs(src.transform.d) > 1e-12:
+                raise ValueError(
+                    "Rotated/sheared GeoTIFF transforms are not supported. "
+                    "Warp the DEM to a north-up metric grid first."
+                )
+
+            coordinate_scale = 1.0
+            if src.crs is not None and src.crs.is_projected:
+                try:
+                    unit_info = src.crs.linear_units_factor
+                    coordinate_scale = float(
+                        unit_info[1] if isinstance(unit_info, tuple) else unit_info
+                    )
+                except (AttributeError, TypeError, ValueError):
+                    logger.warning("Could not determine CRS linear units; assuming metres.")
+
             # Read the first band
             if bounds is not None:
                 # Compute the window for the requested bounds
@@ -141,6 +173,8 @@ class LOLALoader:
             # Store CRS and transform for metadata
             crs_str = str(src.crs) if src.crs else "unknown"
             file_nodata = src.nodata
+            band_scale = float(src.scales[0]) if src.scales else 1.0
+            band_offset = float(src.offsets[0]) if src.offsets else 0.0
 
         ny, nx = elevation.shape
         logger.info("  Raw grid: %d x %d pixels (%.1f MB)",
@@ -163,6 +197,10 @@ class LOLALoader:
         # Step 2: Fill or replace NoData
         if num_nodata > 0:
             elevation = self._handle_nodata(elevation, nodata_mask)
+
+        # GeoTIFF scale/offset are part of the measurement definition.  The
+        # USGS LOLA 118 m product, for example, stores half-metre integer DNs.
+        elevation = elevation * band_scale + band_offset
 
         # Step 3: Optional downsampling
         if max_size is not None and max(ny, nx) > max_size:
@@ -190,6 +228,9 @@ class LOLALoader:
             [transform.f + (i + 0.5) * transform.e for i in range(ny)],
             dtype=np.float64,
         )
+        x_coords *= coordinate_scale
+        y_coords *= coordinate_scale
+        resolution_m *= coordinate_scale
 
         # Center the coordinate system around the DEM center
         x_center = (x_coords[0] + x_coords[-1]) / 2.0
@@ -222,6 +263,10 @@ class LOLALoader:
             "z_range_m": float(elevation.max() - elevation.min()),
             "nodata_pixels": int(num_nodata),
             "nodata_pct": float(pct_nodata),
+            "band_scale": band_scale,
+            "band_offset": band_offset,
+            "provenance_verified": provenance is not None,
+            "provenance": provenance,
         }
 
         return DEMData(
@@ -274,6 +319,7 @@ class LOLALoader:
         -------
         np.ndarray
             Elevation grid with NoData handled.
+
         """
         elevation = elevation.copy()
 

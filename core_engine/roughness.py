@@ -48,6 +48,7 @@ References
   for airless bodies." *Icarus*, 83, 27–38.
 
 Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
+
 """
 
 from __future__ import annotations
@@ -56,7 +57,6 @@ import math
 
 import numpy as np
 from numba import njit, prange
-
 
 # ===================================================================
 # DEFAULT PARAMETERS
@@ -112,6 +112,7 @@ def effective_emissivity(
     - At θ̄ = 0: ε_eff = ε₀ (flat surface, no cavity effect)
     - As θ̄ increases: cavities deepen, more self-heating,
       ε_eff → 1.0 (perfect blackbody limit)
+
     """
     if rms_slope_deg <= 0.0:
         return epsilon_0
@@ -160,6 +161,7 @@ def compute_effective_emissivity_array(
     -------
     np.ndarray
         Effective emissivity per face. Shape: (num_faces,).
+
     """
     n = len(face_slopes_deg)
     result = np.empty(n, dtype=np.float64)
@@ -196,6 +198,7 @@ def compute_face_slopes(face_normals: np.ndarray) -> np.ndarray:
     Notes
     -----
     slope = arccos(n̂ · ẑ) = arccos(n_z)
+
     """
     n = face_normals.shape[0]
     slopes = np.empty(n, dtype=np.float64)
@@ -241,6 +244,7 @@ def compute_roughness_correction(
     -------
     np.ndarray
         Effective emissivity per face. Shape: (num_faces,).
+
     """
     # Compute per-face slope from normals
     face_slopes = compute_face_slopes(face_normals)

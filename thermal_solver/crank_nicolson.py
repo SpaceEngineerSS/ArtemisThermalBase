@@ -49,6 +49,7 @@ References
 - Crank, J. & Nicolson, P. (1947). Proc. Cambridge Phil. Soc., 43, 50-67.
 - Spencer, J.R., et al. (1989). Icarus, 78, 337-354.
 - Hayne, P.O., et al. (2017). JGR Planets, 122, 2371-2400.
+
 """
 
 from __future__ import annotations
@@ -57,7 +58,7 @@ import logging
 from dataclasses import dataclass
 
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 from core_engine.constants import SimulationConfig
 
@@ -84,6 +85,7 @@ class ThermalColumn:
     dz_bar : np.ndarray
         Averaged spacings for interior nodes. Shape: (N-1,).
         dz_bar_j = (dz_j + dz_{j-1}) / 2 for j = 1, ..., N-1.
+
     """
 
     z: np.ndarray
@@ -104,6 +106,7 @@ def create_thermal_column(config: SimulationConfig) -> ThermalColumn:
     -------
     ThermalColumn
         Initialized column with uniform temperature.
+
     """
     z = config.solver.grid.build_grid()
     N = len(z) - 1  # number of layers
@@ -159,6 +162,7 @@ def _thomas_solve(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) ->
     Stability is guaranteed because the heat equation discretization
     produces a strictly diagonally dominant matrix:
     |b_j| > |a_j| + |c_j| for all j (since C_j = ρ·cp/Δt > 0).
+
     """
     N = len(d) - 1
 
@@ -246,6 +250,7 @@ def _step_crank_nicolson(
     -------
     T_new : np.ndarray
         Updated temperature profile [K]. Shape: (N+1,).
+
     """
     N = len(T) - 1
 
@@ -291,12 +296,14 @@ def _step_crank_nicolson(
         return 2.0 * k1 * k2 / (k1 + k2)
 
     # Total absorbed flux at surface
-    Q_in = Q_solar + Q_ir + Q_geo
+    # Geothermal heat enters through the deep boundary below. Adding it at
+    # the surface as well would inject the same physical flux twice.
+    Q_in = Q_solar + Q_ir
 
     # --- Newton iteration loop ---
     T_new = T.copy()
 
-    for newton_iter in range(newton_max_iter):
+    for _newton_iter in range(newton_max_iter):
         # Allocate tridiagonal coefficients
         a = np.zeros(N + 1, dtype=np.float64)
         b = np.zeros(N + 1, dtype=np.float64)
@@ -385,6 +392,52 @@ def _step_crank_nicolson(
     return T_new
 
 
+@njit(cache=True, parallel=True)
+def _step_crank_nicolson_batch(
+    temperatures: np.ndarray,
+    z: np.ndarray,
+    dz: np.ndarray,
+    dz_bar: np.ndarray,
+    dt: float,
+    q_solar: np.ndarray,
+    q_ir: np.ndarray,
+    q_geo: float,
+    albedo: float,
+    emissivities: np.ndarray,
+    sigma: float,
+    newton_max_iter: int,
+    newton_tol: float,
+    newton_relax: float,
+    k_func_params: np.ndarray,
+    cp_func_params: np.ndarray,
+    rho_func_params: np.ndarray,
+) -> np.ndarray:
+    """Advance all independent 1-D columns in one parallel Numba call."""
+    num_faces = temperatures.shape[0]
+    updated = np.empty_like(temperatures)
+    for face_index in prange(num_faces):
+        updated[face_index] = _step_crank_nicolson(
+            temperatures[face_index],
+            z,
+            dz,
+            dz_bar,
+            dt,
+            q_solar[face_index],
+            q_ir[face_index],
+            q_geo,
+            albedo,
+            emissivities[face_index],
+            sigma,
+            newton_max_iter,
+            newton_tol,
+            newton_relax,
+            k_func_params,
+            cp_func_params,
+            rho_func_params,
+        )
+    return updated
+
+
 # ===================================================================
 # HIGH-LEVEL SOLVER CLASS
 # ===================================================================
@@ -400,6 +453,7 @@ class CrankNicolsonSolver:
     ----------
     config : SimulationConfig
         Full simulation configuration.
+
     """
 
     def __init__(self, config: SimulationConfig) -> None:
@@ -467,6 +521,7 @@ class CrankNicolsonSolver:
             Absorbed IR from surrounding terrain [W/m²]. Default: 0.
         dt : float, optional
             Override time step [s]. If None, uses config value.
+
         """
         if dt is None:
             dt = self._dt
@@ -493,6 +548,53 @@ class CrankNicolsonSolver:
 
         column.T[:] = T_new
 
+    def step_batch(
+        self,
+        temperatures: np.ndarray,
+        z: np.ndarray,
+        dz: np.ndarray,
+        dz_bar: np.ndarray,
+        q_solar: np.ndarray,
+        q_ir: np.ndarray | None = None,
+        emissivities: np.ndarray | None = None,
+        dt: float | None = None,
+    ) -> None:
+        """Advance a dense ``(num_faces, num_layers)`` state in-place."""
+        num_faces = temperatures.shape[0]
+        if q_solar.shape != (num_faces,):
+            raise ValueError("q_solar must contain one value per face.")
+        if q_ir is None:
+            q_ir = np.zeros(num_faces, dtype=np.float64)
+        if emissivities is None:
+            emissivities = np.full(num_faces, self._emissivity, dtype=np.float64)
+        if q_ir.shape != (num_faces,) or emissivities.shape != (num_faces,):
+            raise ValueError("q_ir and emissivities must contain one value per face.")
+        if dt is None:
+            dt = self._dt
+
+        batch_size = self._config.solver.batch_size_faces
+        for start in range(0, num_faces, batch_size):
+            stop = min(start + batch_size, num_faces)
+            temperatures[start:stop] = _step_crank_nicolson_batch(
+                temperatures[start:stop],
+                z,
+                dz,
+                dz_bar,
+                dt,
+                q_solar[start:stop],
+                q_ir[start:stop],
+                self._Q_geo,
+                self._albedo,
+                emissivities[start:stop],
+                self._sigma,
+                self._newton_max,
+                self._newton_tol,
+                self._newton_relax,
+                self._k_params,
+                self._cp_params,
+                self._rho_params,
+            )
+
     def compute_surface_radiation(self, T_surf: float) -> float:
         """Compute the outgoing thermal radiation flux.
 
@@ -505,6 +607,7 @@ class CrankNicolsonSolver:
         -------
         float
             Radiated flux ε·σ·T⁴ [W/m²].
+
         """
         return self._emissivity * self._sigma * T_surf**4
 
@@ -524,6 +627,7 @@ class CrankNicolsonSolver:
         -------
         float
             Total internal energy [J/m²].
+
         """
         reg = self._config.regolith
         E = 0.0

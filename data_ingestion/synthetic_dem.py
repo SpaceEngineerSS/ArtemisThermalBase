@@ -23,13 +23,13 @@ References
   on the Moon." In: Impact and Explosion Cratering, pp. 489-509.
 - Zuber, M.T., et al. (2012). "Constraints on the volatile distribution
   within Shackleton crater." Nature, 486, 378-381.
+
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 
@@ -54,6 +54,7 @@ class DEMData:
         Grid spacing [m/pixel].
     metadata : dict
         Additional metadata about the DEM (type, parameters, etc.).
+
     """
 
     elevation: np.ndarray
@@ -82,6 +83,7 @@ def generate_synthetic_dem(config: SyntheticDEMConfig) -> DEMData:
     ------
     ValueError
         If ``config.crater_type`` is not recognized.
+
     """
     rng = np.random.default_rng(config.seed)
     logger.info(
@@ -137,6 +139,7 @@ def _generate_parabolic_bowl(
     -------
     DEMData
         Parabolic bowl crater DEM.
+
     """
     R = config.radius_m
     D = config.depth_m
@@ -233,6 +236,7 @@ def _generate_conical(
     -------
     DEMData
         Conical crater DEM.
+
     """
     R = config.radius_m
     D = config.depth_m
@@ -301,6 +305,7 @@ def _generate_flat(
     -------
     DEMData
         Flat terrain DEM with z=0 everywhere.
+
     """
     R = config.radius_m
     res = config.grid_resolution_m
@@ -347,6 +352,7 @@ def compute_dem_statistics(dem: DEMData) -> dict:
     dict
         Statistics including min, max, mean, std of elevation,
         total area, number of pixels, etc.
+
     """
     elev = dem.elevation
     res = dem.resolution_m
