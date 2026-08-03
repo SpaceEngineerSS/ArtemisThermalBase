@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 
@@ -94,7 +95,10 @@ def save_results(
     if probe_temps:
         probe_path = output_dir / "probe_temps.npz"
         arrays = {k: np.array(v, dtype=np.float64) for k, v in probe_temps.items()}
-        np.savez_compressed(probe_path, **arrays)
+        # NumPy accepts arbitrary array names here; its type stub models the
+        # reserved ``allow_pickle`` keyword and cannot express this dynamic
+        # mapping without widening the keyword value type.
+        np.savez_compressed(probe_path, **cast(dict[str, Any], arrays))
         saved.append(probe_path)
         logger.debug("Saved probe_temps.npz: %d probes", len(arrays))
 
