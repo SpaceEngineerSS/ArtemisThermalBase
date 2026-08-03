@@ -8,12 +8,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest
+      # Keep modules separate so public check metadata identifies a failing
+      # numerical subsystem even when raw Actions logs require authentication.
+      - name: Test integration and research pipeline
+        run: python -m pytest tests/test_integration_fixes.py tests/test_research_pipeline.py
+      - name: Test coordinates and illumination
+        run: python -m pytest tests/test_phase_d.py
+      - name: Test ray tracer
+        run: python -m pytest tests/test_raytracer.py
+      - name: Test thermal solver
+        run: python -m pytest tests/test_thermal_solver.py
+      - name: Test physics v2
+        run: python -m pytest tests/test_physics_v2.py
+      - name: Test physics v3
+        run: python -m pytest tests/test_physics_v3.py
       - run: python -m ruff check .
       - run: python -m mypy core_engine data_ingestion simulation thermal_solver validation main.py
