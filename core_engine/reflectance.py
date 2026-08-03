@@ -48,9 +48,15 @@ Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numba import njit, prange
+from numba import njit
+
+if TYPE_CHECKING:
+    prange = range
+else:
+    from numba import prange
 
 # ===================================================================
 # DEFAULT PARAMETERS — Mature Highland Regolith

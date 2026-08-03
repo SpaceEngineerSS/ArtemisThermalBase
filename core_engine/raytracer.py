@@ -31,9 +31,15 @@ References
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numba import boolean, float64, int64, njit, prange
+from numba import njit
+
+if TYPE_CHECKING:
+    prange = range
+else:
+    from numba import prange
 
 from core_engine.mesh import TriangleMesh
 
@@ -171,7 +177,7 @@ def ray_aabb_intersect(
     bbox_min: np.ndarray,
     bbox_max: np.ndarray,
     t_max_limit: float,
-) -> boolean:
+) -> bool:
     """Test if a ray intersects an axis-aligned bounding box.
 
     Uses the slab method with precomputed inverse direction to avoid
@@ -231,7 +237,7 @@ def _shadow_ray_bvh(
     tri_verts: np.ndarray,
     ordered_tri_indices: np.ndarray,
     epsilon: float,
-) -> boolean:
+) -> bool:
     """Test if a shadow ray is occluded by ANY triangle in the BVH.
 
     Uses stack-based iterative traversal. Returns True on the FIRST hit
@@ -326,7 +332,7 @@ def _closest_hit_bvh(
     tri_verts: np.ndarray,
     ordered_tri_indices: np.ndarray,
     epsilon: float,
-) -> tuple[int64, float64]:
+) -> tuple[int, float]:
     """Find the closest triangle hit by a ray using BVH traversal.
 
     Unlike ``_shadow_ray_bvh`` which early-exits on ANY hit, this function
@@ -372,7 +378,7 @@ def _closest_hit_bvh(
     bbox_max_tmp = np.empty(3, dtype=np.float64)
 
     closest_t = _INF
-    closest_tri_idx = int64(-1)
+    closest_tri_idx = -1
 
     while stack_ptr > 0:
         stack_ptr -= 1
@@ -407,7 +413,7 @@ def _closest_hit_bvh(
                 )
                 if t_hit > epsilon and t_hit < closest_t:
                     closest_t = t_hit
-                    closest_tri_idx = int64(tri_idx)
+                    closest_tri_idx = int(tri_idx)
         else:
             # INTERNAL NODE
             left = int(bvh_nodes[base + _CHILD_OR_START])
