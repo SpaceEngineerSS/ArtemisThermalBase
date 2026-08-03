@@ -326,12 +326,11 @@ class TestBVHShadowMap:
     def test_shadow_boundary_moves_with_sun_angle(
         self, small_bowl_dem: DEMData,
     ) -> None:
-        """The shadow boundary x-position should move toward center
-        as the sun drops lower (smaller elevation angle).
+        """The centerline shadowed fraction should shrink as the Sun rises.
 
-        This validates that the raytracer correctly computes shadow
-        geometry for a bowl crater without depending on the exact
-        analytical boundary position (which is discretization-sensitive).
+        A single boundary cell is discretization-sensitive and can remain
+        unchanged across nearby Sun angles. The shadowed fraction inside the
+        crater is the robust finite-resolution form of the same invariant.
         """
         mesh = dem_to_mesh(small_bowl_dem)
         bvh_nodes, tri_verts, ordered_indices = build_bvh(mesh, max_leaf_triangles=4)
@@ -343,7 +342,8 @@ class TestBVHShadowMap:
             pytest.skip("No faces along centerline")
 
         cx = mesh.face_centroids[centerline_mask, 0]
-        boundaries: list[float] = []
+        cy = mesh.face_centroids[centerline_mask, 1]
+        centerline_shadow_fractions: list[float] = []
 
         for alpha_deg in [5.0, 8.0]:
             alpha_rad = np.radians(alpha_deg)
@@ -358,25 +358,27 @@ class TestBVHShadowMap:
             )
 
             ci = illum[centerline_mask]
-            order = np.argsort(cx)
-            cx_sorted = cx[order]
-            ci_sorted = ci[order]
 
-            transitions = np.where(np.diff(ci_sorted) > 0.5)[0]
-            if len(transitions) == 0:
-                pytest.skip(f"No transition at α={alpha_deg}°")
+            # A structured triangular mesh has several center-band faces at
+            # identical x coordinates. Sorting those faces by x alone leaves
+            # ties in a platform-dependent order and can create artificial
+            # lit/shadow transitions. For each x, select the face closest to
+            # y=0; y itself is the final deterministic tie-breaker.
+            order = np.lexsort((cy, np.abs(cy), cx))
+            cx_ordered = cx[order]
+            ci_ordered = ci[order]
+            cx_sorted, first_at_x = np.unique(cx_ordered, return_index=True)
+            ci_sorted = ci_ordered[first_at_x]
 
-            # Take the transition closest to x=0 (crater center)
-            transition_xs = cx_sorted[transitions]
-            idx_closest = np.argmin(np.abs(transition_xs))
-            boundaries.append(float(transition_xs[idx_closest]))
+            crater_interior = np.abs(cx_sorted) < 500.0
+            centerline_shadow_fractions.append(
+                1.0 - float(ci_sorted[crater_interior].mean())
+            )
 
-        # At lower sun (5°), the shadow extends further from the sun
-        # (more negative x) than at higher sun (8°)
-        assert boundaries[0] < boundaries[1], (
-            f"Shadow boundary should move toward -x at lower sun. "
-            f"α=5° boundary={boundaries[0]:.1f}, "
-            f"α=8° boundary={boundaries[1]:.1f}"
+        assert centerline_shadow_fractions[0] > centerline_shadow_fractions[1], (
+            "Centerline shadow must shrink as the Sun rises. "
+            f"α=5° shadow={centerline_shadow_fractions[0]:.3f}, "
+            f"α=8° shadow={centerline_shadow_fractions[1]:.3f}"
         )
 
     def test_center_shadowed_below_critical_angle(
