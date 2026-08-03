@@ -42,14 +42,14 @@ jobs:
         run: python -m pytest tests/test_physics_v3.py
       - run: python -m ruff check .
       - name: Type-check core engine
-        run: python -m mypy core_engine
+        run: python -m mypy -p core_engine
       - name: Type-check data ingestion
-        run: python -m mypy data_ingestion
+        run: python -m mypy -p data_ingestion
       - name: Type-check simulation
-        run: python -m mypy simulation
+        run: python -m mypy -p simulation
       - name: Type-check thermal solver
-        run: python -m mypy thermal_solver
+        run: python -m mypy -p thermal_solver
       - name: Type-check validation
-        run: python -m mypy validation
+        run: python -m mypy -p validation
       - name: Type-check entry point
-        run: python -m mypy main.py
+        run: python -m mypy -m main
