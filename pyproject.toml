@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.backends"
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
 
 [project]
 name = "artemis-thermal-base"
@@ -70,6 +70,17 @@ Homepage = "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
 Repository = "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
 Documentation = "https://github.com/SpaceEngineerSS/ArtemisThermalBase/tree/main/docs"
 Issues = "https://github.com/SpaceEngineerSS/ArtemisThermalBase/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "core_engine",
+    "data_ingestion",
+    "gui",
+    "simulation",
+    "thermal_solver",
+    "validation",
+    "visualization",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
