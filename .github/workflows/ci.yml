@@ -20,8 +20,12 @@ jobs:
         run: python -m pytest tests/test_integration_fixes.py tests/test_research_pipeline.py
       - name: Test coordinates and illumination
         run: python -m pytest tests/test_phase_d.py
-      - name: Test ray tracer
-        run: python -m pytest tests/test_raytracer.py
+      - name: Test ray-triangle intersections
+        run: python -m pytest tests/test_raytracer.py::TestMollerTrumbore
+      - name: Test ray-box intersections
+        run: python -m pytest tests/test_raytracer.py::TestRayAABB
+      - name: Test BVH shadow maps
+        run: python -m pytest tests/test_raytracer.py::TestBVHShadowMap
       - name: Test thermal solver
         run: python -m pytest tests/test_thermal_solver.py
       - name: Test physics v2
