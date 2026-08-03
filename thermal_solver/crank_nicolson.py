@@ -56,9 +56,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numba import njit, prange
+from numba import njit
+
+if TYPE_CHECKING:
+    prange = range
+else:
+    from numba import prange
 
 from core_engine.constants import SimulationConfig
 
