@@ -1,0 +1,32 @@
+# Shackleton on real terrain, at laptop cost.
+#
+# Real LOLA topography and NAIF DE440 Sun geometry, but preview-grade
+# numerics: 20-minute steps, one spin-up lunar day, 16 rays to the solar
+# disk, no terrain infrared. Research mode stays off, so this is a quick
+# look, not a result to publish; research_shackleton.yaml is that.
+#
+#   python tools/fetch_research_data.py --group ephemeris
+#   python tools/prepare_lola_dem.py --extent-km 40 --resolution-m 200 \
+#       --output data/processed/shackleton_lola_200m.tif
+#   artemis run --config shackleton_preview \
+#       --dem data/processed/shackleton_lola_200m.tif --output output/shackleton
+extends: default_config.yaml
+
+solver:
+  thermal:
+    time:
+      dt_s: 1200.0
+
+ephemeris:
+  mode: "spice"
+  kernel_files:
+    - "data/ephemeris/naif0012.tls"
+    - "data/ephemeris/de440s.bsp"
+    - "data/ephemeris/moon_pa_de440_200625.bpc"
+    - "data/ephemeris/moon_de440_250416.tf"
+
+time_range:
+  start: "2025-01-01T00:00:00Z"
+  end: "2025-01-30T12:44:03Z"
+  output_interval_s: 21600.0
+  spinup_cycles: 1

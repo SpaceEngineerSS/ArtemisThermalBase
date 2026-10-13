@@ -92,6 +92,7 @@ packages = [
 [tool.hatch.build.targets.wheel.force-include]
 "config/default_config.yaml" = "artemis_thermal/config/default_config.yaml"
 "config/research_shackleton.yaml" = "artemis_thermal/config/research_shackleton.yaml"
+"config/shackleton_preview.yaml" = "artemis_thermal/config/shackleton_preview.yaml"
 "config/data_sources.yaml" = "artemis_thermal/config/data_sources.yaml"
 
 [tool.hatch.build.targets.sdist]

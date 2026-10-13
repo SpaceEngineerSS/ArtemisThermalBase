@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.png binary
+*.ttf binary
+*.woff2 binary
+*.npy binary
+*.npz binary
+*.tif binary
+*.bat text eol=crlf

@@ -1,182 +1,92 @@
-<p align="center">
-  <img src="docs/hero_artemis.png" alt="ArtemisThermalBase illustrative synthetic preview" width="900">
-</p>
+# ArtemisThermalBase
 
-<h1 align="center">ArtemisThermalBase</h1>
+Illumination and regolith temperature for lunar polar terrain, on a laptop.
 
-<p align="center">
-  <a href="https://github.com/SpaceEngineerSS/ArtemisThermalBase/actions"><img src="https://img.shields.io/github/actions/workflow/status/SpaceEngineerSS/ArtemisThermalBase/ci.yml?branch=main&label=CI" alt="CI status"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB" alt="Python 3.11+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT license"></a>
-  <a href="CITATION.cff"><img src="https://img.shields.io/badge/Citation-CFF-blue" alt="Citation CFF"></a>
-</p>
+![Hottest surface temperature over one lunar day around Shackleton crater, computed from LOLA topography and the NAIF DE440 Sun](docs/img/hero.png)
 
-<p align="center"><em>The header image is an illustrative synthetic preview, not a LOLA/Diviner validation product.</em></p>
+ArtemisThermalBase traces sunlight across a digital elevation model of the
+lunar poles and follows the heat into a regolith column under every facet. It
+answers the questions a landing site or a rover traverse raises: which ground
+is lit and for how long, how hot and how cold it gets, how long the longest
+night lasts, and where water ice would survive.
 
-Version 0.4.0 - open-source lunar south-pole illumination and thermal simulation with
-BVH-accelerated ray tracing, an implicit subsurface heat solver, real LOLA
-topography support, and NAIF/JPL lunar geometry.
+The image above is one lunar day over a 40 km window around Shackleton:
+79 202 facets of LOLA topography, the Sun from NAIF DE440, a 16-ray solar disk
+for penumbra, after one lunar day of spin-up. It took 9 minutes on an
+eight-core laptop.
 
-> Scientific status: the implementation has provenance, numerical, and
-> integration checks, but quantitative LRO Diviner validation is not complete.
-> See [Validation Status](docs/VALIDATION_STATUS.md) before interpreting results.
+**Documentation:** <https://spaceengineerss.github.io/ArtemisThermalBase/>
+· [Getting started](docs/guide.md) · [Physics](docs/physics.md)
+· [Configuration](docs/configuration.md) · [Changelog](CHANGELOG.md)
 
-## Capabilities
-
-- Equal-solid-angle extended-Sun sampling with per-sample projected irradiance,
-  terrain shadows, and penumbra.
-- Pinned NAIF DE440 kernels evaluated in the lunar `MOON_ME` frame with `LT+S`
-  aberration correction; kernel hashes are stored with results.
-- LRO LOLA GeoTIFF scale/offset handling, lunar metric CRS checks, NoData
-  processing, and SHA-256 provenance sidecars.
-- Nonlinear Crank–Nicolson 1-D regolith columns with temperature/depth-dependent
-  properties and geothermal heat applied once at the lower boundary.
-- Dense batched Numba execution, memory preflight, Hapke reflectance,
-  roughness-adjusted emissivity, one-bounce terrain IR, and spin-up convergence.
-- A fail-closed research mode that rejects synthetic/unverified DEMs, missing
-  kernels, analytical ephemeris fallbacks, and insufficient spin-up.
-- A `checksums.sha256` manifest for every persisted simulation result bundle.
-
-## Installation
+## Install and run
 
 ```bash
 git clone https://github.com/SpaceEngineerSS/ArtemisThermalBase.git
 cd ArtemisThermalBase
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dem,ephemeris,gui]"
+
+artemis run --duration 24     # synthetic Shackleton-sized bowl, about half a minute
+artemis ui output             # look at it in the desktop app
 ```
 
-Python 3.11 or newer is required.
-
-## Fast preview
-
-The default configuration is deliberately synthetic and suitable for software
-tests, demonstrations, and performance work—not scientific claims.
-
-```bash
-python main.py --duration 6
-python main.py --cratersize 500 --duration 1 --point-source --dt 600
-```
-
-Synthetic terrain is never selected automatically when a real-data download
-fails. It must be requested explicitly.
-
-## Research workflow
-
-Fetch the four pinned NAIF inputs and create a SHA-256 lock:
+Real terrain takes two downloads from the official sources, both checked:
 
 ```bash
 python tools/fetch_research_data.py --group ephemeris
+python tools/prepare_lola_dem.py --extent-km 40 --resolution-m 200 \
+    --output data/processed/shackleton_lola_200m.tif
+artemis run --config shackleton_preview \
+    --dem data/processed/shackleton_lola_200m.tif --output output/shackleton
 ```
 
-Prepare a metric, provenance-tracked LOLA window. The remote source is a large
-classic GeoTIFF, so using a previously downloaded local source is preferable on
-limited-bandwidth connections.
+Python 3.11 or newer. Tested on Windows and Linux; macOS should work but is not in CI.
+
+## What is inside
+
+- Shadows from rays to many points of the solar disk, so penumbra and the
+  grazing polar Sun come out right; a compiled BVH builds 583 000 triangles in
+  about a second.
+- The Sun from NAIF SPICE (research), Skyfield (preview) or an analytical
+  polar model (offline), all rotated onto the terrain through one tested frame
+  transformation.
+- Terrain lowered onto the lunar sphere; optional one-bounce infrared between
+  facets; Hapke albedo; roughness-adjusted emissivity.
+- A 6 m regolith column per facet with temperature- and depth-dependent
+  properties (Hayne et al. 2017), all columns advanced in one parallel call.
+- Ice stability from Hertz–Knudsen sublimation, classified by the hottest
+  temperature each place reaches.
+- A research mode that refuses to run without a provenance-checked DEM, SPICE
+  geometry and enough spin-up.
+- A desktop app to set up runs, watch them, inspect a site and compare runs.
+
+## Status
+
+The geometry, ray tracing, conduction and data pipeline are tested on every
+change, and the Sun direction agrees with SPICE. A quantitative comparison
+with LRO Diviner temperatures has not been done yet; see
+[Validation and limitations](docs/limitations.md) before you use a number
+from here in a publication.
+
+Version 0.5.0 changes results relative to 0.4: the Sun direction was wrong
+for real ephemerides. Details in the [changelog](CHANGELOG.md).
+
+## Development
 
 ```bash
-python tools/prepare_lola_dem.py \
-  --output data/processed/shackleton_lola_240m.tif \
-  --extent-km 30 --resolution-m 240
-```
-
-Audit the DEM hash/CRS/relief and SPICE geometry:
-
-```bash
-python -m validation.check_research_readiness \
-  --dem data/processed/shackleton_lola_240m.tif
-```
-
-Run the research configuration:
-
-```bash
-python main.py \
-  --config config/research_shackleton.yaml \
-  --dem data/processed/shackleton_lola_240m.tif \
-  --duration 708.734 --output output/research_shackleton
-```
-
-This is intentionally expensive: the configuration uses 64 Sun-disk samples,
-512 view-factor rays, a 120 s timestep, and three lunar spin-up cycles. A paper
-or dataset release must also include convergence sweeps; one run is not evidence
-of numerical convergence.
-
-## Surface and subsurface model
-
-For each facet, absorbed sunlight is integrated over visible solar samples:
-
-```text
-Q_solar = (1 - A) S(t) mean_disk[max(0, n·s) V(s)]
-```
-
-`V(s)` is the binary terrain visibility for sample direction `s`. The surface
-boundary includes absorbed solar flux and terrain IR; geothermal flux enters at
-the bottom boundary. The subsurface equation is:
-
-```text
-ρ(z) cp(T) ∂T/∂t = ∂/∂z [k(T,z) ∂T/∂z]
-```
-
-The default vertical grid has 100 geometrically stretched layers and is about
-6.19 m deep. Full equations and implementation assumptions are in
-[Physics Model](docs/PHYSICS_MODEL.md).
-
-## Model architecture
-
-```mermaid
-flowchart LR
-    LOLA["LOLA DEM + provenance"] --> Mesh["Metric mesh + BVH"]
-    NAIF["NAIF DE440 / MOON_ME"] --> Sun["Extended solar disk"]
-    Sun --> Rays["Per-sample shadow rays"]
-    Mesh --> Rays
-    Rays --> Flux["Projected absorbed flux"]
-    Mesh --> VF["Sparse terrain view factors"]
-    VF --> Flux
-    Flux --> CN["Batched nonlinear Crank-Nicolson columns"]
-    CN --> Output["Results + metadata + SHA-256 manifest"]
-    Output --> Diviner["Diviner comparison - pending"]
-```
-
-The preview path may substitute synthetic terrain and solar motion. The research
-path requires the LOLA and NAIF inputs shown above and fails closed if their
-provenance cannot be established.
-
-## Quality gates
-
-```bash
+python -m pip install -e ".[dev]"
 python -m pytest
 python -m ruff check .
-python -m mypy core_engine data_ingestion simulation thermal_solver validation main.py
+python -m mypy -p core_engine -p simulation -p gui
+python tools/build_docs.py --serve   # the documentation site on localhost:8000
 ```
 
-CI runs the same gates on pushes and pull requests.
+How to contribute is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Documentation
+## Citing
 
-- [Research data sources](docs/DATA_SOURCES.md)
-- [Reproducibility workflow](docs/REPRODUCIBILITY.md)
-- [Scientific validation status](docs/VALIDATION_STATUS.md)
-- [Physics model](docs/PHYSICS_MODEL.md)
-- [Configuration guide](docs/CONFIGURATION.md)
-- [Assumptions and limitations](docs/ASSUMPTIONS_AND_LIMITATIONS.md)
-- [API reference](docs/API_REFERENCE.md)
-- [Remediation plan](docs/REMEDIATION_PLAN.md)
-- [ADR-001: batched CPU core](docs/architecture/adr-001-batched-cpu-simulation-core.md)
-- [ADR-002: fail-closed research mode](docs/architecture/adr-002-fail-closed-research-mode.md)
+If this software helps your work, cite it with [CITATION.cff](CITATION.cff)
+and cite the data and models it uses (LOLA, NAIF DE440, Hayne et al. 2017),
+listed in [Data](docs/data.md).
 
-## Data and validation policy
-
-Large kernels, DEMs, and generated outputs are excluded from Git. Manifests,
-hash locks, preparation code, configurations, and validation reports provide the
-reproduction trail. The intended observational reference is LRO Diviner. PDS
-missing brightness temperatures (`-9999`) are excluded, but footprint/channel/
-geometry matching is still pending; this repository therefore does not claim
-Diviner validation.
-
-## Citation
-
-Citation metadata is provided in [CITATION.cff](CITATION.cff). Please also cite
-the LOLA, NAIF/JPL, Diviner, and physical-property sources appropriate to your
-run, as listed in [Research Data Sources](docs/DATA_SOURCES.md).
-
-## License
-
-[MIT](LICENSE)
+MIT licence. Mehmet Gümüş, 2026.

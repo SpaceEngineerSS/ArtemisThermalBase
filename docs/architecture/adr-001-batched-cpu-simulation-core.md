@@ -1,4 +1,4 @@
-# ADR-001: Batched CPU Simulation Core
+# ADR-001: Batched CPU simulation core
 
 ## Status
 
@@ -35,7 +35,6 @@ stable.
 ## Trade-offs
 
 - A dense temperature matrix can still be large at research resolution.
-- The batch kernel allocates a second matrix during each update.
 - The default preview is not publication resolution.
 - Skyfield mode requires a JPL kernel and may download it on first use.
 
@@ -47,7 +46,15 @@ stable.
 - Research runs must explicitly select resolution, spin-up cycles, solar-disk
   samples, and terrain-IR settings and should record the resulting config.
 
-## Revisit Trigger
+## Update for 0.5.0
+
+The batch kernel now updates the state in place (no second matrix), the BVH
+build moved to Numba, and the memory check covers the whole run, not only the
+thermal state. Profiling a month over Shackleton at 200 m now puts shadow rays
+and conduction at similar shares of the time, so the revisit trigger below
+still holds.
+
+## Revisit trigger
 
 Reconsider the CPU/Numba backend when profiling shows the batched thermal
 kernel, rather than BVH construction or shadow rays, dominates a validated

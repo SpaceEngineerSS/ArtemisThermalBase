@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" width="760" height="360" role="img" aria-label="Pipeline of one simulation run">
+<title>Pipeline of one simulation run</title>
+<style>text{font-family:'IBM Plex Mono','Plex Mono',ui-monospace,Consolas,monospace;font-size:12px}.sans{font-family:'IBM Plex Sans','Plex Sans',system-ui,sans-serif}.small{font-size:10.5px}.big{font-size:14px}line,path,polyline,circle,rect,ellipse{fill:none;stroke-width:1;vector-effect:non-scaling-stroke}.bg{fill:#F4F2EC}.ink{fill:#1D1F21}.ink2{fill:#55585B}.ink3{fill:#8C8E8F}.acc{fill:#B44A0E}.s-ink{stroke:#1D1F21}.s-ink2{stroke:#55585B}.s-rule{stroke:#A9A397}.s-faint{stroke:#D8D3C8}.s-acc{stroke:#E8641B}.s-cold{stroke:#2F6690}.f-sheet{fill:#FBFAF6}.f-acc{fill:#E8641B}.f-cold{fill:#2F6690}.f-soft{fill:#93B5CC}.f-rule{fill:#D8D3C8}@media (prefers-color-scheme:dark){.bg{fill:#17191B}.ink{fill:#E8E5DD}.ink2{fill:#A7A9AA}.ink3{fill:#73777A}.acc{fill:#F59A63}.s-ink{stroke:#E8E5DD}.s-ink2{stroke:#A7A9AA}.s-rule{stroke:#4A4F54}.s-faint{stroke:#2F3337}.s-acc{stroke:#F07A35}.s-cold{stroke:#6FA3C8}.f-sheet{fill:#1F2225}.f-acc{fill:#F07A35}.f-cold{fill:#6FA3C8}.f-soft{fill:#3E5F77}.f-rule{fill:#2F3337}}</style>
+<rect class="bg" x="0" y="0" width="760" height="360" style="stroke:none"/>
+<rect class="s-ink2 f-sheet" x="20" y="30" width="190" height="92"/>
+<text class="acc small" x="30.0" y="48.0" text-anchor="start">01</text>
+<text class="ink sans big" x="30.0" y="66.0" text-anchor="start">Terrain</text>
+<text class="ink2 small" x="30.0" y="84.0" text-anchor="start">LOLA GeoTIFF or</text>
+<text class="ink2 small" x="30.0" y="98.0" text-anchor="start">synthetic bowl</text>
+<rect class="s-ink2 f-sheet" x="20" y="210" width="190" height="92"/>
+<text class="acc small" x="30.0" y="228.0" text-anchor="start">02</text>
+<text class="ink sans big" x="30.0" y="246.0" text-anchor="start">Sun</text>
+<text class="ink2 small" x="30.0" y="264.0" text-anchor="start">SPICE DE440, Skyfield</text>
+<text class="ink2 small" x="30.0" y="278.0" text-anchor="start">or analytical model</text>
+<rect class="s-ink2 f-sheet" x="285" y="30" width="190" height="92"/>
+<text class="acc small" x="295.0" y="48.0" text-anchor="start">03</text>
+<text class="ink sans big" x="295.0" y="66.0" text-anchor="start">Mesh on the sphere</text>
+<text class="ink2 small" x="295.0" y="84.0" text-anchor="start">2 triangles per cell,</text>
+<text class="ink2 small" x="295.0" y="98.0" text-anchor="start">BVH (binned SAH)</text>
+<rect class="s-ink2 f-sheet" x="285" y="210" width="190" height="92"/>
+<text class="acc small" x="295.0" y="228.0" text-anchor="start">04</text>
+<text class="ink sans big" x="295.0" y="246.0" text-anchor="start">Sun on the mesh</text>
+<text class="ink2 small" x="295.0" y="264.0" text-anchor="start">body frame → grid axes</text>
+<text class="ink2 small" x="295.0" y="278.0" text-anchor="start">disk samples s_k</text>
+<rect class="s-acc f-sheet" x="550" y="120" width="190" height="92"/>
+<text class="acc small" x="560.0" y="138.0" text-anchor="start">05</text>
+<text class="ink sans big" x="560.0" y="156.0" text-anchor="start">Shadow rays</text>
+<text class="ink2 small" x="560.0" y="174.0" text-anchor="start">visible disk fraction,</text>
+<text class="ink2 small" x="560.0" y="188.0" text-anchor="start">mean of max(0, n·s)·V</text>
+<rect class="s-ink2 f-sheet" x="550" y="250" width="190" height="92"/>
+<text class="acc small" x="560.0" y="268.0" text-anchor="start">06</text>
+<text class="ink sans big" x="560.0" y="286.0" text-anchor="start">Regolith columns</text>
+<text class="ink2 small" x="560.0" y="304.0" text-anchor="start">1-D heat, 101 nodes,</text>
+<text class="ink2 small" x="560.0" y="318.0" text-anchor="start">one parallel call</text>
+<line class="s-ink" x1="210.0" y1="76.0" x2="283.0" y2="76.0"/><polyline class="s-ink" points="277.6,78.5 283.0,76.0 277.6,73.5"/>
+<line class="s-ink" x1="210.0" y1="256.0" x2="283.0" y2="256.0"/><polyline class="s-ink" points="277.6,258.5 283.0,256.0 277.6,253.5"/>
+<line class="s-ink" x1="475.0" y1="76.0" x2="548.0" y2="150.0"/><polyline class="s-ink" points="542.4,147.9 548.0,150.0 546.0,144.3"/>
+<line class="s-ink" x1="475.0" y1="256.0" x2="548.0" y2="182.0"/><polyline class="s-ink" points="546.0,187.7 548.0,182.0 542.4,184.1"/>
+<line class="s-ink" x1="645.0" y1="212.0" x2="645.0" y2="248.0"/><polyline class="s-ink" points="642.5,242.6 645.0,248.0 647.5,242.6"/>
+<path class="s-rule" d="M550 296 H520 V330 H245" stroke-dasharray="4 3"/>
+<line class="s-rule" x1="260.0" y1="330.0" x2="240.0" y2="330.0"/><polyline class="s-rule" points="245.4,327.5 240.0,330.0 245.4,332.5"/>
+<text class="ink2 small" x="232.0" y="334.0" text-anchor="end">run folder → figures, app</text>
+<text class="acc small" x="20.0" y="20.0" text-anchor="start">ONE TIME STEP</text>
+<text class="ink3 small" x="740.0" y="20.0" text-anchor="end">steps 04–06 repeat every dt</text>
+</svg>

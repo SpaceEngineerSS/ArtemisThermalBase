@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 330" width="760" height="330" role="img" aria-label="Shadowing and penumbra geometry">
+<title>Shadowing and penumbra geometry</title>
+<style>text{font-family:'IBM Plex Mono','Plex Mono',ui-monospace,Consolas,monospace;font-size:12px}.sans{font-family:'IBM Plex Sans','Plex Sans',system-ui,sans-serif}.small{font-size:10.5px}.big{font-size:14px}line,path,polyline,circle,rect,ellipse{fill:none;stroke-width:1;vector-effect:non-scaling-stroke}.bg{fill:#F4F2EC}.ink{fill:#1D1F21}.ink2{fill:#55585B}.ink3{fill:#8C8E8F}.acc{fill:#B44A0E}.s-ink{stroke:#1D1F21}.s-ink2{stroke:#55585B}.s-rule{stroke:#A9A397}.s-faint{stroke:#D8D3C8}.s-acc{stroke:#E8641B}.s-cold{stroke:#2F6690}.f-sheet{fill:#FBFAF6}.f-acc{fill:#E8641B}.f-cold{fill:#2F6690}.f-soft{fill:#93B5CC}.f-rule{fill:#D8D3C8}@media (prefers-color-scheme:dark){.bg{fill:#17191B}.ink{fill:#E8E5DD}.ink2{fill:#A7A9AA}.ink3{fill:#73777A}.acc{fill:#F59A63}.s-ink{stroke:#E8E5DD}.s-ink2{stroke:#A7A9AA}.s-rule{stroke:#4A4F54}.s-faint{stroke:#2F3337}.s-acc{stroke:#F07A35}.s-cold{stroke:#6FA3C8}.f-sheet{fill:#1F2225}.f-acc{fill:#F07A35}.f-cold{fill:#6FA3C8}.f-soft{fill:#3E5F77}.f-rule{fill:#2F3337}}</style>
+<rect class="bg" x="0" y="0" width="760" height="330" style="stroke:none"/>
+<text class="acc small" x="20.0" y="24.0" text-anchor="start">CROSS-SECTION THROUGH A POLAR CRATER, ANGLES EXAGGERATED</text>
+<path class="f-rule" style="stroke:none" opacity="0.6" d="M20 165 L150 160 L210 148 L230 146 L250 152 L300 230 L340 262 L400 270 L470 268 L520 250 L580 205 L620 165 L650 142 L670 140 L700 146 L740 150 L740 292 L20 292 Z"/>
+<path class="ink" style="stroke:none" opacity="0.13" d="M230 146 L595 191 L580 205 L520 250 L470 268 L400 270 L340 262 L300 230 L250 152 Z"/>
+<path class="s-ink" d="M20 165 L150 160 L210 148 L230 146 L250 152 L300 230 L340 262 L400 270 L470 268 L520 250 L580 205 L620 165 L650 142 L670 140 L700 146 L740 150"/>
+<line class="s-rule" x1="230" y1="146" x2="595" y2="191" stroke-dasharray="3 3"/>
+<text class="ink3 small" x="470.0" y="196.0" text-anchor="middle">rim shadow line</text>
+<circle class="s-acc" cx="46" cy="120" r="14"/>
+<text class="acc small" x="68.0" y="96.0" text-anchor="start">solar disk (0.53°, drawn larger)</text>
+<line class="s-acc" x1="50.0" y1="110.0" x2="595.0" y2="186.0"/><polyline class="s-acc" points="590.2,187.5 595.0,186.0 590.8,183.3"/>
+<line class="s-acc" x1="50.0" y1="120.0" x2="595.0" y2="186.0"/><polyline class="s-acc" points="590.2,187.6 595.0,186.0 590.8,183.4"/>
+<line class="s-rule" x1="50" y1="130" x2="226.0" y2="148.3" stroke-dasharray="4 3"/>
+<path class="s-ink2" d="M222.0 144.3 l8 8 m0 -8 l-8 8"/>
+<line class="s-ink" x1="598.0" y1="187.0" x2="574.0" y2="163.0"/><polyline class="s-ink" points="578.7,164.7 574.0,163.0 575.7,167.7"/>
+<text class="ink " x="568.0" y="159.0" text-anchor="end">n</text>
+<circle class="f-acc" style="stroke:none" cx="598" cy="187" r="3"/>
+<text class="ink small" x="612.0" y="214.0" text-anchor="start">facet in penumbra:</text>
+<text class="ink2 small" x="612.0" y="229.0" text-anchor="start">2 of 3 disk samples</text>
+<text class="ink2 small" x="612.0" y="244.0" text-anchor="start">reach it, f = 0.67</text>
+<text class="ink2 small" x="232.0" y="176.0" text-anchor="middle">rim</text>
+<text class="ink2 small" x="395.0" y="256.0" text-anchor="middle">never lit</text>
+<text class="ink2 small" x="20.0" y="316.0" text-anchor="start">Q = (1 − A(μ)) · S(t) · mean over samples of max(0, n·s) · V</text>
+</svg>

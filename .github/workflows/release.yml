@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - name: Tag matches the package version
+        run: |
+          version=$(python -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('artemis_thermal/__init__.py').read()).group(1))")
+          test "v$version" = "${GITHUB_REF_NAME}"
+      - run: python -m build
+      - name: Release notes from CHANGELOG.md
+        run: |
+          python - <<'PY'
+          import os, re
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          match = re.search(rf"^## {re.escape(version)}\b.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
+          open("notes.md", "w", encoding="utf-8").write(match.group(1).strip() if match else "")
+          PY
+      - uses: softprops/action-gh-release@v3
+        with:
+          body_path: notes.md
+          files: dist/*

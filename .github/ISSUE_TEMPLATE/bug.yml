@@ -1,0 +1,25 @@
+name: Something is wrong
+description: A crash, a wrong number, or behaviour that does not match the docs.
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The command or app steps, and the config if you changed it.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version and platform
+      placeholder: "artemis --version; Windows 11 / Ubuntu 24.04; Python 3.12"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      render: text

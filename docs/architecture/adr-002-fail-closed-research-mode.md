@@ -1,4 +1,4 @@
-# ADR-002: Fail-Closed Research Data Mode
+# ADR-002: Fail-closed research mode
 
 ## Status
 
@@ -22,6 +22,13 @@ fallback remains available only through explicit preview commands.
 - Research setup is less convenient and requires external files.
 - Kernel and DEM binaries are too large for Git and need manifest-driven setup.
 - The same physics core avoids a second implementation drifting from preview.
+
+## Update for 0.5.0
+
+The checks used to live only in configuration validation, so a command-line
+override (`--ephemeris synthetic`) could bypass them. They now also run at the
+start of every run, and a failing roughness model stops a research run
+instead of falling back to flat emissivity.
 
 ## Revisit trigger
 

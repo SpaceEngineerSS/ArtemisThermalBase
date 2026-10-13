@@ -1,12 +1,26 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it and the data products listed in docs/DATA_SOURCES.md."
-title: "ArtemisThermalBase"
-type: software
+message: "If you use this software, please cite it as below, together with the data sources it relies on (LOLA, NAIF DE440, Hayne et al. 2017)."
+title: "ArtemisThermalBase: illumination and regolith temperature for lunar polar terrain"
+version: 0.5.0
+date-released: 2026-10-13
+license: MIT
+repository-code: "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
+url: "https://spaceengineerss.github.io/ArtemisThermalBase/"
+abstract: >-
+  ArtemisThermalBase computes illumination and subsurface temperature over
+  lunar polar terrain. It traces shadows to an extended solar disk through a
+  bounding-volume hierarchy on LOLA topography lowered onto the lunar sphere,
+  takes the Sun from NAIF SPICE, and advances a one-dimensional regolith
+  column with temperature- and depth-dependent properties under every facet.
+  Outputs include temperature extremes, sunlit time and water-ice stability.
+keywords:
+  - Moon
+  - lunar south pole
+  - illumination
+  - thermal model
+  - ray tracing
+  - cold traps
+  - water ice
 authors:
   - family-names: "Gümüş"
     given-names: "Mehmet"
-version: "0.4.0"
-date-released: "2026-08-03"
-url: "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
-repository-code: "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
-license: MIT

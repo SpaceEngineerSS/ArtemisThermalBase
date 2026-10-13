@@ -36,7 +36,7 @@ class ReferencePage(QWidget):
         self._body.addWidget(section(
             "04  Reference", "Surface models",
             "Curves are computed from the default configuration the first time this page "
-            "opens. The physics behind them is in docs/PHYSICS_MODEL.md.",
+            "opens. The physics behind them is in docs/physics.md.",
         ))
         self._plots: list[pg.PlotWidget] = []
 

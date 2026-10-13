@@ -15,6 +15,7 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -89,6 +90,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--ephemeris", choices=["synthetic", "skyfield", "spice"], default=None)
     run.add_argument("--point-source", action=argparse.BooleanOptionalAction, default=None,
                      help="treat the Sun as a point (fast) or as a disk (penumbra)")
+    run.add_argument("--view-factors", action=argparse.BooleanOptionalAction, default=None,
+                     help="one bounce of terrain infrared between facets")
+    run.add_argument("--disk-samples", type=_positive(int), default=None,
+                     help="rays per face toward the solar disk")
     run.add_argument("--spinup-cycles", type=int, default=None,
                      help="lunar days to run before recording")
     run.add_argument("--output", default=None, help="run folder (default: config output)")
@@ -121,6 +126,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     from simulation.runner import SimulationRunner
 
     config = load_config(args.config)
+    if args.view_factors is not None:
+        config = replace(config, view_factors=replace(config.view_factors,
+                                                      enabled=args.view_factors))
+    if args.disk_samples is not None:
+        config = replace(config, illumination=replace(config.illumination,
+                                                      solar_disk_samples=args.disk_samples))
     log_platform_info()
     log_assumptions(config)
 

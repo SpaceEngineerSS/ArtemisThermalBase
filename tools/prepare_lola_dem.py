@@ -1,4 +1,13 @@
-"""Extract and reproject an official LOLA DEM window for research runs."""
+"""Cut a south-polar window out of the global LOLA DEM and reproject it.
+
+    python tools/prepare_lola_dem.py --extent-km 40 --resolution-m 200
+        --output data/processed/shackleton_lola_200m.tif
+
+Only the rows that cover the window are read over HTTPS (about 60 MB for
+Shackleton); the 8 GB global file is never downloaded in full. The output is
+a polar stereographic GeoTIFF plus a provenance sidecar that research mode
+checks before it accepts the DEM.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +26,11 @@ DEFAULT_SOURCE = (
     "https://planetarymaps.usgs.gov/mosaic/"
     "Lunar_LRO_LOLA_Global_LDEM_118m_Mar2014.tif"
 )
+# USGS redirects to this bucket; GDAL sometimes fails on the redirect itself.
+MIRROR_SOURCE = (
+    "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/"
+    "Lunar_LRO_LOLA_Global_LDEM_118m_Mar2014.tif"
+)
 PRODUCT_ID = "Lunar_LRO_LOLA_Global_LDEM_118m_Mar2014"
 MOON_RADIUS_M = 1_737_400.0
 
@@ -26,11 +40,11 @@ def main() -> int:
         description="Create a metric south-polar LOLA subset with provenance."
     )
     parser.add_argument("--source", default=DEFAULT_SOURCE)
-    parser.add_argument("--output", default="data/processed/shackleton_lola_240m.tif")
+    parser.add_argument("--output", default="data/processed/shackleton_lola_200m.tif")
     parser.add_argument("--lat", type=float, default=-89.67)
     parser.add_argument("--lon", type=float, default=129.78)
     parser.add_argument("--extent-km", type=float, default=30.0)
-    parser.add_argument("--resolution-m", type=float, default=240.0)
+    parser.add_argument("--resolution-m", type=float, default=200.0)
     args = parser.parse_args()
 
     import rasterio
@@ -54,7 +68,15 @@ def main() -> int:
     extent_m = args.extent_km * 1000.0
     size = int(math.ceil(extent_m / args.resolution_m))
 
-    with rasterio.open(raster_source) as src:
+    try:
+        src = rasterio.open(raster_source)
+    except rasterio.errors.RasterioIOError:
+        if source_is_local or source_text != DEFAULT_SOURCE:
+            raise
+        print("USGS endpoint did not answer; trying the S3 mirror of the same product.")
+        source_text = MIRROR_SOURCE
+        src = rasterio.open(f"/vsicurl/{MIRROR_SOURCE}")
+    with src:
         if src.crs is None:
             raise ValueError("Source LOLA product has no CRS metadata.")
         center_x, center_y = transform(

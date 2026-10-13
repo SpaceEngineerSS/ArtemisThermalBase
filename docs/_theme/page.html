@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if page.slug == "index" %}ArtemisThermalBase{% else %}{{ page.title }} · ArtemisThermalBase{% endif %}</title>
+{% if page.description %}<meta name="description" content="{{ page.description }}">{% endif %}
+<link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/IBMPlexSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
+{% if has_math %}<link rel="stylesheet" href="assets/vendor/katex/katex.min.css">{% endif %}
+<script>
+  try { var t = localStorage.getItem("atb-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body class="page-{{ page.slug }}">
+<a class="skip" href="#content">Skip to content</a>
+<header class="bar">
+  <a class="brand" href="index.html" aria-label="ArtemisThermalBase home">
+    <img src="assets/mark.svg" alt="" width="22" height="22" class="mark">
+    <span class="name">ArtemisThermalBase</span>
+    <span class="ver">{{ version }}</span>
+  </a>
+  <button class="menu" type="button" aria-expanded="false" aria-controls="nav">Contents</button>
+  <div class="tools">
+    <button class="search-open" type="button" aria-label="Search the docs">Search <kbd>/</kbd></button>
+    <button class="theme" type="button" aria-label="Switch colour theme">Theme</button>
+    <a href="{{ repo }}">Source</a>
+  </div>
+</header>
+
+<div class="frame">
+  <nav id="nav" class="nav" aria-label="Documentation">
+    <ol>
+      {% for item in nav %}
+      <li{% if item.slug == page.slug %} class="here"{% endif %}><a href="{{ item.slug }}.html"{% if item.slug == page.slug %} aria-current="page"{% endif %}><span class="num">{{ item.kicker or "··" }}</span>{{ item.nav }}</a></li>
+      {% endfor %}
+    </ol>
+    {% if adrs %}
+    <p class="nav-head">Decisions</p>
+    <ol class="adrs">
+      {% for item in adrs %}
+      <li{% if item.slug == page.slug %} class="here"{% endif %}><a href="{{ item.slug }}.html">{{ item.title }}</a></li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+  </nav>
+
+  <main id="content" class="sheet">
+    <header class="head">
+      {% if page.kicker %}<p class="kicker">{{ page.kicker }} · {{ page.nav or page.title }}</p>{% endif %}
+      <h1>{{ page.title }}</h1>
+      {% if page.description %}<p class="lede">{{ page.description }}</p>{% endif %}
+    </header>
+    <article class="prose">
+{{ page.html | safe }}
+    </article>
+    <footer class="foot">
+      <span>ArtemisThermalBase {{ version }}</span>
+      <span>MIT licence</span>
+      <a href="{{ repo }}/blob/main/{{ source_rel }}">Edit this page</a>
+      <a href="{{ repo }}/issues">Report a problem with this page</a>
+    </footer>
+  </main>
+
+  {% if page.toc|length > 2 %}
+  <aside class="toc" aria-label="On this page">
+    <p class="nav-head">On this page</p>
+    <ol>
+      {% for level, anchor, title in page.toc %}
+      <li class="l{{ level }}"><a href="#{{ anchor }}">{{ title }}</a></li>
+      {% endfor %}
+    </ol>
+  </aside>
+  {% endif %}
+</div>
+
+<div class="search" hidden>
+  <div class="search-box" role="dialog" aria-label="Search">
+    <input type="search" placeholder="Search headings…" aria-label="Search headings">
+    <ol class="results"></ol>
+    <p class="hint">Enter opens the first match · Esc closes</p>
+  </div>
+</div>
+
+<script src="assets/site.js" defer></script>
+{% if has_math %}
+<script src="assets/vendor/katex/katex.min.js" defer></script>
+<script src="assets/vendor/katex/auto-render.min.js" defer
+  onload="renderMathInElement(document.querySelector('.prose'), {delimiters: [{left: '\\[', right: '\\]', display: true}, {left: '\\(', right: '\\)', display: false}], throwOnError: false})"></script>
+{% endif %}
+</body>
+</html>

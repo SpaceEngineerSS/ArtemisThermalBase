@@ -334,7 +334,7 @@ def figure_hero(bundle: ResultsBundle, path: Path, dpi: int) -> Path:
     rows = [
         ("site", f"{abs(lat):.2f}°{'S' if lat < 0 else 'N'}  {lon % 360:.2f}°E"
          if lat is not None else "–"),
-        ("terrain", _site_label(bundle).split(",")[0].lower()),
+        ("terrain", _site_label(bundle).split(",")[0].replace("Synthetic", "synthetic")),
         ("faces", f"{bundle.num_faces:,}".replace(",", " ")),
         ("span", f"{meta.get('duration_hours', 0):.1f} h, dt {meta.get('dt_s', 0):.0f} s"),
         ("Sun", "point" if meta.get("point_source_mode") else "disk, penumbra"),
