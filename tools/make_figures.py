@@ -3,6 +3,7 @@
     python tools/make_figures.py diagrams
     python tools/make_figures.py run output/shackleton      # report figures of a run
     python tools/make_figures.py bench bench.json           # performance chart
+    python tools/make_figures.py difference RUN_A RUN_B     # max-T difference map
 
 Diagrams are written as SVG by hand (no plotting library) so they stay crisp
 and small, and they carry their own light/dark colours from the shared
@@ -349,11 +350,63 @@ def bench_chart(results_file: str) -> None:
     print(f"wrote {out.relative_to(ROOT).as_posix()}")
 
 
+def difference_figure(run_a: str, run_b: str, name: str = "ir_difference") -> None:
+    """Map of the maximum temperature of run B minus run A, plus histogram."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from artemis_thermal.simulation.io_manager import ResultsBundle
+    from artemis_thermal.visualization.figures import _caption, _setup, colormap
+
+    pal = _setup()
+    a, b = ResultsBundle.open(run_a), ResultsBundle.open(run_b)
+    diff = b.raster("surface_T_max") - a.raster("surface_T_max")
+    left, right, bottom, top = (v / 1e3 for v in a.extent)
+    fig, (ax, hx) = plt.subplots(1, 2, figsize=(9.2, 4.3),
+                                 gridspec_kw={"width_ratios": [1.15, 1], "wspace": 0.32})
+    span = float(np.nanpercentile(np.abs(diff), 99.5))
+    image = ax.imshow(diff, extent=(left, right, bottom, top), cmap=colormap("diverging"),
+                      vmin=-span, vmax=span, interpolation="nearest")
+    ax.set_title("Max T with terrain IR minus without")
+    ax.set_xlabel("x  [km]")
+    ax.set_ylabel("y  [km]")
+    cbar = fig.colorbar(image, ax=ax, fraction=0.045, pad=0.02)
+    cbar.set_label("K", color=pal.ink_2)
+    lit = np.asarray(a.array("illumination_mean"))
+    t_a = np.asarray(a.array("surface_T_max"))
+    t_b = np.asarray(b.array("surface_T_max"))
+    psr = lit <= 0.0
+    bins = np.arange(0, 180, 5)
+    hx.hist(t_a[psr], bins=bins, color=pal.ink_3, label="without terrain IR")
+    hx.hist(t_b[psr], bins=bins, color=pal.accent, alpha=0.8, label="with terrain IR")
+    hx.axvline(110, color=pal.cold, linewidth=1)
+    hx.text(112, hx.get_ylim()[1] * 0.92, "110 K", color=pal.cold, fontsize=7.5)
+    hx.set_title("Never-lit cells: hottest temperature")
+    hx.set_xlabel("max T  [K]")
+    hx.set_ylabel("cells")
+    hx.legend(loc="upper right", bbox_to_anchor=(1.0, 0.82))
+    for side in ("top", "right"):
+        hx.spines[side].set_visible(False)
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.9, bottom=0.19)
+    _caption(fig, 5, "Shackleton, one lunar day. Infrared from sunlit walls lifts shadowed "
+             "floors from 21 K to about 100 K; the speckle is Monte Carlo noise of 128 rays.",
+             pal)
+    out = IMG / "run" / f"{name}.png"
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+    print(f"wrote {out.relative_to(ROOT).as_posix()}")
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] == "diagrams":
         diagrams()
     elif argv[0] == "run":
         run_figures(argv[1])
+    elif argv[0] == "difference":
+        difference_figure(argv[1], argv[2])
     elif argv[0] == "bench":
         bench_chart(argv[1])
     else:

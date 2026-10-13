@@ -156,7 +156,7 @@ matters inside craters, where walls warm the floor by tens of kelvin.
 | `view_factors.enabled` | `false` | |
 | `view_factors.num_rays` | `128` | Monte Carlo rays per face; 512 for research |
 | `view_factors.seed` | `42` | |
-| `view_factors.reciprocity_tolerance` | `0.05` | warn above this area-weighted asymmetry |
+| `view_factors.reciprocity_tolerance` | `0.2` | warn above this mismatch between power sent and received per face |
 | `view_factors.max_neighbors` | `256` | distinct faces stored per row; extra hits are counted and reported |
 | `view_factors.max_memory_mb` | `1024.0` | refuse before allocating more |
 

@@ -132,11 +132,19 @@ $$
 
 one bounce of gray thermal emission, using the surface temperatures of the
 previous step. Reflected infrared and scattered sunlight are not included.
-Reciprocity $A_iF_{ij} = A_jF_{ji}$ is checked as an area-weighted aggregate
-and reported; Monte Carlo noise keeps it at a few per cent.
+Reciprocity $A_iF_{ij} = A_jF_{ji}$ implies that each facet sends as much
+power into the terrain as the terrain sends back to it; the run reports the
+relative mismatch of those totals. It falls like $1/\sqrt{N_{	ext{rays}}}$:
+on a test bowl, 0.16 at 128 rays and 0.08 at 512.
 
 Without terrain infrared, a permanently shadowed floor cools until it radiates
-away only the geothermal flux, about 21 K. Diviner sees most south-polar cold
+away only the geothermal flux, about 21 K. We ran the same lunar day over
+Shackleton twice, with and without this term:
+
+![Left: difference in maximum temperature with and without terrain infrared. Right: histogram of the hottest temperature of never-lit cells in both runs](img/run/ir_difference.png "Terrain infrared changes the answer to the ice question. The area where ice is stable shrinks from 302 to 201 km², and 31 km² become marginal.")
+
+Without it the floor never leaves 21 K; with it the median hottest temperature
+of never-lit cells is 100 K and some reach 150 K. Diviner sees most south-polar cold
 traps clearly warmer than that (Paige et al. 2010); for crater floors the
 difference is mostly this term. Turn it on for anything quantitative inside
 craters.

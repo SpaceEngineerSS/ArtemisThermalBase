@@ -94,7 +94,7 @@ view_factors:
   enabled: false
   num_rays: 128
   seed: 42
-  reciprocity_tolerance: 0.05        # relative; Monte Carlo noise sits around 1-3 %
+  reciprocity_tolerance: 0.2         # sent vs received power per face; ~0.16 at 128 rays, ~0.08 at 512
   max_neighbors: 256
   max_memory_mb: 1024.0
 

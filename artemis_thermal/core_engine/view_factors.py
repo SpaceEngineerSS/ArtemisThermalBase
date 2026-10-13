@@ -77,6 +77,7 @@ class ViewFactorMatrix:
     col_idx: np.ndarray
     values: np.ndarray
     num_faces: int
+    reciprocity_error: float = 0.0
 
     @property
     def nnz(self) -> int:
@@ -412,7 +413,7 @@ def compute_view_factor_matrix(
     max_memory_mb: float = 2048.0,
     epsilon: float = 1e-10,
     seed: int = 42,
-    reciprocity_tol: float = 0.05,
+    reciprocity_tol: float = 0.2,
 ) -> ViewFactorMatrix:
     """Compute the sparse view factor matrix for a triangle mesh.
 
@@ -440,7 +441,7 @@ def compute_view_factor_matrix(
     seed : int
         Random seed for reproducibility.
     reciprocity_tol : float
-        Allowed area-weighted reciprocity asymmetry before warning.
+        Allowed :func:`reciprocity_error` before warning.
 
     Returns
     -------
@@ -521,17 +522,16 @@ def compute_view_factor_matrix(
     if row_sums.size and row_sums.max() > 1.05:
         logger.warning("Largest view-factor row sum is %.3f (> 1.05).", row_sums.max())
 
-    asymmetry = _reciprocity_asymmetry(
-        row_ptr, col_idx_csr, values_csr, face_areas, max(1, num_faces // 2000),
-    )
-    if asymmetry > reciprocity_tol:
+    vf.reciprocity_error = reciprocity_error(row_ptr, col_idx_csr, values_csr, face_areas)
+    if vf.reciprocity_error > reciprocity_tol:
         logger.warning(
-            "View-factor reciprocity: area-weighted asymmetry %.3f exceeds %.3f. "
-            "More rays per face will reduce it.", asymmetry, reciprocity_tol,
+            "View-factor reciprocity error %.3f exceeds %.3f; it falls roughly as "
+            "1/sqrt(rays), so raise view_factors.num_rays.", vf.reciprocity_error,
+            reciprocity_tol,
         )
     else:
-        logger.info("View-factor reciprocity asymmetry %.3f (tolerance %.3f).",
-                    asymmetry, reciprocity_tol)
+        logger.info("View-factor reciprocity error %.3f (tolerance %.3f).",
+                    vf.reciprocity_error, reciprocity_tol)
     return vf
 
 
@@ -557,33 +557,23 @@ def _compact_csr(
     return row_ptr, col_idx, values
 
 
-@njit(cache=True)
-def _reciprocity_asymmetry(
+def reciprocity_error(
     row_ptr: np.ndarray,
     col_idx: np.ndarray,
     values: np.ndarray,
     face_areas: np.ndarray,
-    row_stride: int,
 ) -> float:
-    """Area-weighted reciprocity error Σ|A_i F_ij − A_j F_ji| / Σ A_i F_ij.
+    """Relative mismatch between radiation each face sends and receives.
 
-    Individual Monte-Carlo entries are too noisy to test one by one, so we
-    measure the aggregate over every ``row_stride``-th row.
+    Reciprocity A_i F_ij = A_j F_ji implies, summed over i, that the power a
+    face sends into the terrain equals the power the terrain sends to it.
+    Comparing those per-face totals converges like 1/sqrt(rays); comparing
+    single Monte-Carlo entries does not, because most reciprocal pairs simply
+    have no hit yet. Returns sum |sent - received| / sum sent.
     """
-    num_faces = face_areas.shape[0]
-    diff = 0.0
-    total = 0.0
-    for i in range(0, num_faces, row_stride):
-        for k in range(row_ptr[i], row_ptr[i + 1]):
-            j = col_idx[k]
-            f_ji = 0.0
-            for m in range(row_ptr[j], row_ptr[j + 1]):
-                if col_idx[m] == i:
-                    f_ji = values[m]
-                    break
-            lhs = face_areas[i] * values[k]
-            diff += abs(lhs - face_areas[j] * f_ji)
-            total += lhs
-    if total <= 0.0:
-        return 0.0
-    return diff / total
+    rows = np.repeat(np.arange(face_areas.shape[0]), np.diff(row_ptr))
+    sent = face_areas * np.bincount(rows, weights=values, minlength=face_areas.shape[0])
+    received = np.bincount(col_idx, weights=face_areas[rows] * values,
+                           minlength=face_areas.shape[0])
+    total = float(sent.sum())
+    return float(np.abs(sent - received).sum() / total) if total > 0 else 0.0

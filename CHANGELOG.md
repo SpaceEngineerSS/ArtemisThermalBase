@@ -55,8 +55,10 @@ rose and set like at the equator. Re-run anything you made with 0.4.
 - **BVH construction** is compiled: 583k triangles in 1.1 s instead of 338 s.
   Shadow maps are bit-for-bit identical to 0.4.
 - Ray kernels no longer allocate per ray, and view-factor post-processing is
-  compiled. Reciprocity is reported as an area-weighted aggregate; the old
-  per-entry check with a 10⁻⁵ tolerance could never pass on Monte Carlo data.
+  compiled. Reciprocity is now measured as the mismatch between the power each
+  facet sends into the terrain and the power it receives (0.16 at 128 rays,
+  0.08 at 512 on a test bowl). The old per-entry check with a 10⁻⁵ tolerance
+  could never pass on Monte Carlo data, and printed a warning on every run.
 - A run no longer keeps one full-mesh copy per output step (11 GB for a month
   at 1M faces). It keeps running minimum, maximum and mean maps and streams
   float32 snapshots to disk inside `output.max_snapshot_mb`.

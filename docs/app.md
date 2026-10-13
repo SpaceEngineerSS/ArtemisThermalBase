@@ -92,6 +92,8 @@ the new one B, so "change one setting, run again, compare" needs no clicks.
 The panel lists the mean and RMS difference, the largest change and the share
 of cells that changed by more than one unit.
 
+![Compare page: maximum temperature of the Shackleton run with terrain infrared minus the run without it](img/app/compare-light.png "Compare page. Terrain infrared adds 13 K on average and up to 136 K on crater floors; 22 % of the cells change by more than 1 K.")
+
 ## Reference
 
 The surface models of the default configuration, drawn the first time you open

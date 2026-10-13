@@ -305,3 +305,4 @@ def test_view_factors_on_a_bowl_are_physical(config) -> None:
     assert 0.25 < row_sums[floor] < 0.45
     assert row_sums[rim] < row_sums[floor]
     assert np.all(vf.col_idx != rows)
+    assert vf.reciprocity_error < 0.25

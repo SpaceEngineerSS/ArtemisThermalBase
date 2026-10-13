@@ -730,7 +730,7 @@ def load_config(config_path: str | Path | None = None) -> SimulationConfig:
         enabled=bool(vf_raw.get("enabled", False)),
         num_rays=int(vf_raw.get("num_rays", 128)),
         seed=int(vf_raw.get("seed", 42)),
-        reciprocity_tolerance=float(vf_raw.get("reciprocity_tolerance", 0.05)),
+        reciprocity_tolerance=float(vf_raw.get("reciprocity_tolerance", 0.2)),
         max_neighbors=int(vf_raw.get("max_neighbors", 256)),
         max_memory_mb=float(vf_raw.get("max_memory_mb", 2048.0)),
     )
