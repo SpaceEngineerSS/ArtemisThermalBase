@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "created_utc": "2026-10-13T09:38:55.062339+00:00",
+  "created_utc": "2026-10-13T10:40:20.340542+00:00",
   "records": [
     {
       "name": "naif_leapseconds",
@@ -15,8 +15,8 @@
       "product_id": "JPL-DE440S",
       "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
       "path": "data/ephemeris/de440s.bsp",
-      "bytes": 34020352,
-      "sha256": "fe5462b7ba71efcfa701041061dc2f253548f3243df707ad5b9bc17b888d4050"
+      "bytes": 32726016,
+      "sha256": "c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2"
     },
     {
       "name": "lunar_orientation_de440",

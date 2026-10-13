@@ -14,7 +14,7 @@ sources:
     product_id: JPL-DE440S
     url: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp
     path: data/ephemeris/de440s.bsp
-    sha256: fe5462b7ba71efcfa701041061dc2f253548f3243df707ad5b9bc17b888d4050
+    sha256: c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2
   lunar_orientation_de440:
     group: ephemeris
     product_id: MOON-PA-DE440-200625

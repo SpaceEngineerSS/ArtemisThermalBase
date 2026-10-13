@@ -94,7 +94,10 @@ difference map. Light and dark themes, bundled fonts, no network access.
   laptop cost.
 - Report figures are drawn from rasters and share their colours with the app.
 - `tools/fetch_research_data.py` pins kernel hashes, resumes interrupted
-  downloads and rejects mismatches. `tools/prepare_lola_dem.py` falls back to
+  downloads and rejects mismatches. The `de440s.bsp` that 0.4's downloader
+  produced was 1.3 MB larger than the file NAIF serves (the old resume code
+  appended to a partial file); its ephemeris data were identical, but the hash
+  was not. The pin is now the NAIF file's hash. `tools/prepare_lola_dem.py` falls back to
   the S3 mirror of the USGS product.
 - `rasterio`, `skyfield` and `spiceypy` moved to the `dem` and `ephemeris`
   extras; `tqdm`, `xarray`, `plotly` and `kaleido` are no longer needed.
