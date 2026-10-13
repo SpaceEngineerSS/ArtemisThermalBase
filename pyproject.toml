@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "artemis-thermal-base"
-version = "0.4.0"
-description = "Research-grade Lunar South Pole micro-illumination & thermal raytracer"
+dynamic = ["version"]
+description = "Illumination and regolith temperature for lunar polar terrain"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -14,11 +14,12 @@ authors = [
 ]
 keywords = [
     "lunar",
-    "thermal",
-    "raytracing",
+    "moon",
+    "thermal-model",
+    "ray-tracing",
     "illumination",
     "south-pole",
-    "artemis",
+    "cold-traps",
     "planetary-science",
 ]
 classifiers = [
@@ -30,49 +31,56 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Environment :: X11 Applications :: Qt",
 ]
 dependencies = [
-    "numpy>=1.26.0",
-    "numba>=0.59.0",
-    "scipy>=1.12.0",
-    "matplotlib>=3.8.0",
-    "plotly>=5.18.0",
+    "numpy>=1.26",
+    "numba>=0.59",
+    "scipy>=1.12",
+    "matplotlib>=3.8",
     "pyyaml>=6.0.1",
-    "rasterio>=1.3.9",
-    "skyfield>=1.48",
-    "spiceypy>=6.0.0",
-    "tqdm>=4.66.0",
-    "xarray>=2024.1.0",
 ]
 
 [project.optional-dependencies]
+# Real terrain: GeoTIFF loading and CRS handling.
+dem = ["rasterio>=1.3.9"]
+# Real Sun positions: Skyfield preview path and the SPICE research path.
+ephemeris = ["skyfield>=1.48", "spiceypy>=6.0"]
+# Desktop app.
+gui = ["PySide6>=6.6", "pyqtgraph>=0.13.4"]
+# Optional 3D terrain view inside the app.
+gui3d = ["PySide6>=6.6", "pyqtgraph>=0.13.4", "pyvista>=0.43", "pyvistaqt>=0.11"]
+# Building the documentation site.
+docs = ["markdown-it-py>=3.0", "mdit-py-plugins>=0.4", "jinja2>=3.1"]
+all = ["artemis-thermal-base[dem,ephemeris,gui,docs]"]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.1.0",
-    "mypy>=1.8.0",
-    "ruff>=0.2.0",
-]
-viz = [
-    "plotly>=5.18.0",
-    "kaleido>=0.2.1",
-]
-gui = [
-    "streamlit>=1.32.0",
-    "stpyvista>=0.1.2",
-    "pyarrow>=15.0.0",
+    "artemis-thermal-base[dem,ephemeris,gui,docs]",
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "pytest-qt>=4.4",
+    "mypy>=1.8",
+    "ruff>=0.4",
 ]
 
 [project.scripts]
 artemis = "simulation.cli:main"
 
+[project.gui-scripts]
+artemis-ui = "gui.app:main"
+
 [project.urls]
-Homepage = "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
+Homepage = "https://spaceengineerss.github.io/ArtemisThermalBase/"
 Repository = "https://github.com/SpaceEngineerSS/ArtemisThermalBase"
-Documentation = "https://github.com/SpaceEngineerSS/ArtemisThermalBase/tree/main/docs"
+Documentation = "https://spaceengineerss.github.io/ArtemisThermalBase/"
 Issues = "https://github.com/SpaceEngineerSS/ArtemisThermalBase/issues"
+Changelog = "https://github.com/SpaceEngineerSS/ArtemisThermalBase/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "artemis_thermal/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = [
+    "artemis_thermal",
     "core_engine",
     "data_ingestion",
     "gui",
@@ -82,25 +90,43 @@ packages = [
     "visualization",
 ]
 
+[tool.hatch.build.targets.wheel.force-include]
+"config/default_config.yaml" = "artemis_thermal/config/default_config.yaml"
+"config/research_shackleton.yaml" = "artemis_thermal/config/research_shackleton.yaml"
+"config/data_sources.yaml" = "artemis_thermal/config/data_sources.yaml"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/docs/_site", "/output*", "/data/ephemeris", "/data/raw"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts = "--tb=short"
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks integration tests",
+    "slow: long-running physics checks (deselect with -m 'not slow')",
+    "gui: needs PySide6 and a Qt platform plugin",
 ]
+qt_api = "pyside6"
+
+[tool.coverage.run]
+source = ["artemis_thermal", "core_engine", "data_ingestion", "simulation",
+          "thermal_solver", "validation", "visualization", "gui"]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+extend-exclude = ["docs/_site"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "D", "UP", "S", "B"]
 ignore = [
-    "D100", "D103", "D104", "D107", "D203", "D205", "D213", "D401", "D417",
+    "D100", "D103", "D104", "D105", "D107", "D203", "D205", "D213", "D401", "D417",
     "N802", "N803", "N806", "N815", "N816",
     "S101",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D101", "D102", "S603", "S607"]
+"tools/**" = ["S310"]
 
 [tool.mypy]
 python_version = "3.11"

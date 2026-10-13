@@ -1,8 +1,9 @@
 """Physical constants, lunar parameters, and configuration loader.
 
-All numerical values are loaded from YAML configuration files.
-NO physical constants are hardcoded in this module or anywhere else.
-This module provides a typed, validated interface to the configuration.
+Physical parameters come from the YAML configuration; this module turns
+that YAML into typed, validated dataclasses. Bundled configurations are
+found by name, so ``load_config("research_shackleton")`` works from any
+working directory.
 
 Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
 
@@ -17,7 +18,6 @@ References
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import platform
 import sys
@@ -99,14 +99,11 @@ class SurfaceProperties:
         Bond albedo [-].
     thermal_emissivity : float
         Broadband thermal emissivity [-].
-    reflectance_model : str
-        Reflectance model name (e.g., 'lambertian').
 
     """
 
     bond_albedo: float
     thermal_emissivity: float
-    reflectance_model: str
 
 
 @dataclass(frozen=True)
@@ -232,8 +229,6 @@ class SolverConfig:
 
     Attributes
     ----------
-    method : str
-        Solver method name (e.g., 'crank_nicolson').
     grid : ThermalGridConfig
         Vertical grid configuration.
     dt_s : float
@@ -247,14 +242,12 @@ class SolverConfig:
 
     """
 
-    method: str
     grid: ThermalGridConfig
     dt_s: float
     max_dt_s: float
     newton: NewtonConfig
     initial_temperature_K: float
-    max_state_memory_mb: float
-    batch_size_faces: int
+    initial_condition: str
 
 
 @dataclass(frozen=True)
@@ -269,15 +262,12 @@ class RaytracerConfig:
         Number of bins for SAH cost sweep.
     epsilon : float
         Zero-test epsilon for Möller-Trumbore algorithm.
-    precision : str
-        Floating point precision ('float32' or 'float64').
 
     """
 
     max_leaf_triangles: int
     sah_num_bins: int
     epsilon: float
-    precision: str
 
 
 @dataclass(frozen=True)
@@ -287,16 +277,13 @@ class IlluminationConfig:
     Attributes
     ----------
     solar_disk_samples : int
-        Number of sample points on the solar disk.
-    sampling_method : str
-        Sampling pattern ('fibonacci', 'concentric', 'random').
+        Number of sample points on the solar disk (Fibonacci pattern).
     point_source_mode : bool
         If True, treat the Sun as a point source (fast preview).
 
     """
 
     solar_disk_samples: int
-    sampling_method: str
     point_source_mode: bool
 
 
@@ -380,7 +367,6 @@ class VolatileConfig:
     """Cold-trap and volatile stability settings."""
 
     enabled: bool
-    model: str
     stable_threshold_k: float
     marginal_threshold_k: float
 
@@ -395,6 +381,7 @@ class EphemerisConfig:
     kernel_files: tuple[str, ...]
     frame: str
     aberration_correction: str
+    synthetic_subsolar_lat_deg: float
 
 
 @dataclass(frozen=True)
@@ -416,6 +403,30 @@ class TimeRangeConfig:
     output_interval_s: float
     spinup_cycles: int
     spinup_convergence_tolerance_k: float
+
+
+@dataclass(frozen=True)
+class TerrainConfig:
+    """Geometry options that apply to every DEM, synthetic or real."""
+
+    curvature: bool
+
+
+@dataclass(frozen=True)
+class ResourcesConfig:
+    """Upper bounds that keep a run inside the machine it runs on."""
+
+    max_memory_mb: float
+
+
+@dataclass(frozen=True)
+class OutputConfig:
+    """Where results go and how figures are rendered."""
+
+    directory: str
+    dpi: int
+    hero_dpi: int
+    max_snapshot_mb: float
 
 
 @dataclass(frozen=True)
@@ -484,6 +495,10 @@ class SimulationConfig:
     ephemeris: EphemerisConfig
     research: ResearchConfig
     time_range: TimeRangeConfig
+    terrain: TerrainConfig
+    resources: ResourcesConfig
+    output: OutputConfig
+    source_path: Path | None = None
     assumptions: list[Assumption] = field(default_factory=list)
 
 
@@ -503,13 +518,68 @@ def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, An
     return merged
 
 
-def load_config(config_path: str | Path) -> SimulationConfig:
+def config_search_dirs() -> list[Path]:
+    """Directories that hold the bundled YAML configurations.
+
+    In a source checkout that is ``<repo>/config``; in an installed wheel the
+    same files ship as ``artemis_thermal/config``.
+    """
+    here = Path(__file__).resolve().parent.parent
+    return [here / "artemis_thermal" / "config", here / "config"]
+
+
+def resolve_config_path(name_or_path: str | Path | None = None) -> Path:
+    """Find a configuration file by path or by bundled name.
+
+    ``None`` means the default configuration. A bare name such as
+    ``research_shackleton`` (with or without ``.yaml``) is looked up in the
+    bundled configuration directories when it is not an existing path.
+    """
+    if name_or_path is None:
+        name_or_path = "default_config.yaml"
+    candidate = Path(name_or_path)
+    if candidate.is_file():
+        return candidate
+    filename = candidate.name if candidate.suffix else f"{candidate.name}.yaml"
+    for directory in config_search_dirs():
+        bundled = directory / filename
+        if bundled.is_file():
+            return bundled
+    raise FileNotFoundError(
+        f"Configuration file not found: {name_or_path}. Bundled configurations: "
+        + ", ".join(sorted(list_bundled_configs()))
+    )
+
+
+def list_bundled_configs() -> list[str]:
+    """Names of the configurations shipped with the package."""
+    names: set[str] = set()
+    for directory in config_search_dirs():
+        if directory.is_dir():
+            names.update(
+                path.stem for path in directory.glob("*.yaml") if path.stem != "data_sources"
+            )
+    return sorted(names)
+
+
+def _resolve_data_path(item: str, config_path: Path) -> str:
+    """Resolve a data path from the config against cwd, then the project root."""
+    path = Path(item)
+    if path.is_absolute() or path.exists():
+        return str(path)
+    project_root = config_path.resolve().parent.parent
+    alternative = project_root / path
+    return str(alternative if alternative.exists() else path)
+
+
+def load_config(config_path: str | Path | None = None) -> SimulationConfig:
     """Load and validate a simulation configuration from a YAML file.
 
     Parameters
     ----------
-    config_path : str or Path
-        Path to the YAML configuration file.
+    config_path : str, Path or None
+        Path to a YAML file, or the name of a bundled configuration.
+        ``None`` loads the default configuration.
 
     Returns
     -------
@@ -524,9 +594,7 @@ def load_config(config_path: str | Path) -> SimulationConfig:
         If required configuration keys are missing or values are invalid.
 
     """
-    config_path = Path(config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    config_path = resolve_config_path(config_path)
 
     with open(config_path, encoding="utf-8") as f:
         raw: dict[str, Any] = yaml.safe_load(f)
@@ -566,7 +634,6 @@ def load_config(config_path: str | Path) -> SimulationConfig:
     surface = SurfaceProperties(
         bond_albedo=float(surf["bond_albedo"]),
         thermal_emissivity=float(surf["thermal_emissivity"]),
-        reflectance_model=str(surf["reflectance_model"]),
     )
 
     # --- Parse regolith properties ---
@@ -607,7 +674,6 @@ def load_config(config_path: str | Path) -> SimulationConfig:
     time_cfg = th["time"]
 
     solver = SolverConfig(
-        method=str(th["method"]),
         grid=ThermalGridConfig(
             dz_surface_m=float(grid_cfg["dz_surface_m"]),
             growth_ratio=float(grid_cfg["growth_ratio"]),
@@ -621,8 +687,7 @@ def load_config(config_path: str | Path) -> SimulationConfig:
             relaxation=float(newton_cfg["relaxation"]),
         ),
         initial_temperature_K=float(th["initial_temperature_K"]),
-        max_state_memory_mb=float(th.get("max_state_memory_mb", 4096.0)),
-        batch_size_faces=int(th.get("batch_size_faces", 50_000)),
+        initial_condition=str(th.get("initial_condition", "equilibrium")),
     )
 
     # --- Parse raytracer config ---
@@ -632,14 +697,12 @@ def load_config(config_path: str | Path) -> SimulationConfig:
         max_leaf_triangles=int(bvh_cfg["max_leaf_triangles"]),
         sah_num_bins=int(bvh_cfg["sah_num_bins"]),
         epsilon=float(rt["epsilon"]),
-        precision=str(rt["precision"]),
     )
 
     # --- Parse illumination config ---
     ill = slv["illumination"]
     illumination = IlluminationConfig(
         solar_disk_samples=int(ill["solar_disk_samples"]),
-        sampling_method=str(ill["sampling_method"]),
         point_source_mode=bool(ill["point_source_mode"]),
     )
 
@@ -667,14 +730,14 @@ def load_config(config_path: str | Path) -> SimulationConfig:
         enabled=bool(vf_raw.get("enabled", False)),
         num_rays=int(vf_raw.get("num_rays", 128)),
         seed=int(vf_raw.get("seed", 42)),
-        reciprocity_tolerance=float(vf_raw.get("reciprocity_tolerance", 1e-5)),
-        max_neighbors=int(vf_raw.get("max_neighbors", 128)),
+        reciprocity_tolerance=float(vf_raw.get("reciprocity_tolerance", 0.05)),
+        max_neighbors=int(vf_raw.get("max_neighbors", 256)),
         max_memory_mb=float(vf_raw.get("max_memory_mb", 2048.0)),
     )
 
     hapke_raw = raw.get("hapke", {})
     hapke = HapkeConfig(
-        enabled=bool(hapke_raw.get("enabled", False)),
+        enabled=bool(hapke_raw.get("enabled", True)),
         single_scattering_albedo=float(hapke_raw.get("single_scattering_albedo", 0.23)),
         b=float(hapke_raw.get("b", 0.21)),
         c=float(hapke_raw.get("c", 0.70)),
@@ -685,7 +748,7 @@ def load_config(config_path: str | Path) -> SimulationConfig:
 
     roughness_raw = raw.get("roughness", {})
     roughness = RoughnessConfig(
-        enabled=bool(roughness_raw.get("enabled", False)),
+        enabled=bool(roughness_raw.get("enabled", True)),
         rms_slope_deg=float(roughness_raw.get("rms_slope_deg", 20.0)),
         cavity_coefficient=float(roughness_raw.get("cavity_coefficient", 0.4)),
     )
@@ -694,7 +757,6 @@ def load_config(config_path: str | Path) -> SimulationConfig:
     thresholds = volatile_raw.get("ice_thresholds_K", {})
     volatiles = VolatileConfig(
         enabled=bool(volatile_raw.get("enabled", False)),
-        model=str(volatile_raw.get("model", "langmuir")),
         stable_threshold_k=float(thresholds.get("stable", 110.0)),
         marginal_threshold_k=float(thresholds.get("marginal", 115.0)),
     )
@@ -704,9 +766,15 @@ def load_config(config_path: str | Path) -> SimulationConfig:
         mode=str(ephemeris_raw.get("mode", "synthetic")),
         kernel_name=str(ephemeris_raw.get("kernel_name", "de421.bsp")),
         data_dir=str(ephemeris_raw.get("data_dir", "data/ephemeris")),
-        kernel_files=tuple(str(item) for item in ephemeris_raw.get("kernel_files", [])),
+        kernel_files=tuple(
+            _resolve_data_path(str(item), config_path)
+            for item in ephemeris_raw.get("kernel_files", [])
+        ),
         frame=str(ephemeris_raw.get("frame", "MOON_ME")),
         aberration_correction=str(ephemeris_raw.get("aberration_correction", "LT+S")),
+        synthetic_subsolar_lat_deg=float(
+            ephemeris_raw.get("synthetic_subsolar_lat_deg", -1.5)
+        ),
     )
 
     research_raw = raw.get("research", {})
@@ -726,6 +794,29 @@ def load_config(config_path: str | Path) -> SimulationConfig:
         spinup_convergence_tolerance_k=float(
             time_range_raw.get("spinup_convergence_tolerance_K", 0.1)
         ),
+    )
+
+    terrain = TerrainConfig(
+        curvature=bool(raw.get("terrain", {}).get("curvature", True)),
+    )
+
+    resources_raw = raw.get("resources", {})
+    legacy_limit = th.get("max_state_memory_mb")
+    if legacy_limit is not None and "max_memory_mb" not in resources_raw:
+        logger.warning(
+            "solver.thermal.max_state_memory_mb is deprecated; "
+            "use resources.max_memory_mb (it now covers the whole run)."
+        )
+    resources = ResourcesConfig(
+        max_memory_mb=float(resources_raw.get("max_memory_mb", legacy_limit or 1536.0)),
+    )
+
+    output_raw = raw.get("output", {})
+    output = OutputConfig(
+        directory=str(output_raw.get("directory", "output")),
+        dpi=int(output_raw.get("dpi", 150)),
+        hero_dpi=int(output_raw.get("hero_dpi", 200)),
+        max_snapshot_mb=float(output_raw.get("max_snapshot_mb", 256.0)),
     )
 
     # --- Build assumptions registry ---
@@ -748,6 +839,10 @@ def load_config(config_path: str | Path) -> SimulationConfig:
         ephemeris=ephemeris,
         research=research,
         time_range=time_range,
+        terrain=terrain,
+        resources=resources,
+        output=output,
+        source_path=config_path,
         assumptions=assumptions,
     )
 
@@ -812,7 +907,7 @@ def _build_assumptions_registry(
         ),
         Assumption(
             "Reflectance Model",
-            "Hapke" if hapke.enabled else surface.reflectance_model,
+            "Hapke" if hapke.enabled else "Lambertian",
             "Simulation configuration",
             "Model-dependent",
         ),
@@ -872,10 +967,22 @@ def _validate_config(config: SimulationConfig) -> None:
         raise ValueError("Grid growth ratio must be > 1.0.")
     if config.solver.dt_s <= 0:
         raise ValueError("Time step must be positive.")
-    if config.solver.max_state_memory_mb <= 0:
-        raise ValueError("Thermal state memory limit must be positive.")
-    if config.solver.batch_size_faces <= 0:
-        raise ValueError("Thermal batch_size_faces must be positive.")
+    if config.solver.max_dt_s < config.solver.dt_s:
+        raise ValueError("solver.thermal.time.max_dt_s must be >= dt_s.")
+    if config.solver.initial_condition not in {"equilibrium", "uniform"}:
+        raise ValueError("solver.thermal.initial_condition must be 'equilibrium' or 'uniform'.")
+    if config.resources.max_memory_mb <= 0:
+        raise ValueError("resources.max_memory_mb must be positive.")
+    if config.raytracer.sah_num_bins < 2:
+        raise ValueError("raytracer.bvh.sah_num_bins must be at least 2.")
+    if config.time_range.output_interval_s <= 0:
+        raise ValueError("time_range.output_interval_s must be positive.")
+    if not (-90.0 <= config.ephemeris.synthetic_subsolar_lat_deg <= 90.0):
+        raise ValueError("ephemeris.synthetic_subsolar_lat_deg must be in [-90, 90].")
+    if config.volatiles.stable_threshold_k >= config.volatiles.marginal_threshold_k:
+        raise ValueError("volatiles: the stable threshold must be below the marginal one.")
+    if config.output.dpi <= 0 or config.output.hero_dpi <= 0:
+        raise ValueError("Output dpi values must be positive.")
     if config.solver.newton.tolerance_K <= 0:
         raise ValueError("Newton tolerance must be positive.")
     if config.raytracer.epsilon <= 0:
@@ -941,20 +1048,3 @@ def log_platform_info() -> None:
     logger.info("  NumPy:     %s", np.__version__)
     logger.info("  Float64 eps: %e", np.finfo(np.float64).eps)
     logger.info("=" * 70)
-
-
-def hash_array(arr: np.ndarray) -> str:
-    """Compute SHA-256 hash of a NumPy array for reproducibility verification.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Array to hash.
-
-    Returns
-    -------
-    str
-        Hex digest of the SHA-256 hash.
-
-    """
-    return hashlib.sha256(arr.tobytes()).hexdigest()

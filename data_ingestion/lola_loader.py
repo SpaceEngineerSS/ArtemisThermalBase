@@ -172,6 +172,8 @@ class LOLALoader:
 
             # Store CRS and transform for metadata
             crs_str = str(src.crs) if src.crs else "unknown"
+            crs_wkt = src.crs.to_wkt() if src.crs else None
+            original_size = f"{src.width}x{src.height}"
             file_nodata = src.nodata
             band_scale = float(src.scales[0]) if src.scales else 1.0
             band_offset = float(src.offsets[0]) if src.offsets else 0.0
@@ -204,7 +206,7 @@ class LOLALoader:
 
         # Step 3: Optional downsampling
         if max_size is not None and max(ny, nx) > max_size:
-            step = max(ny, nx) // max_size
+            step = -(-max(ny, nx) // max_size)  # ceil: never exceed max_size
             elevation = elevation[::step, ::step]
             ny, nx = elevation.shape
             # Adjust the effective transform
@@ -254,7 +256,12 @@ class LOLALoader:
             "type": "lola_geotiff",
             "source_file": str(file_path),
             "crs": crs_str,
-            "original_size": f"{src.width}x{src.height}" if 'src' in dir() else "unknown",
+            "crs_wkt": crs_wkt,
+            "projected_center": [
+                x_center / coordinate_scale,
+                y_center / coordinate_scale,
+            ],
+            "original_size": original_size,
             "num_pixels_x": nx,
             "num_pixels_y": ny,
             "resolution_m": resolution_m,

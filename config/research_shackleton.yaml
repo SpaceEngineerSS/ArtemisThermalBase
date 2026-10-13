@@ -1,17 +1,15 @@
+# Shackleton research configuration.
+#
+# Fail-closed: needs a provenance-verified LOLA DEM (tools/prepare_lola_dem.py)
+# and the NAIF DE440 kernels (tools/fetch_research_data.py --group ephemeris).
+# Agreement with Diviner is tracked in docs/VALIDATION_STATUS.md and is not
+# implied by running this file.
 extends: default_config.yaml
-
-metadata:
-  version: "0.4.0-research"
-  description: >
-    Fail-closed Shackleton research configuration using provenance-verified
-    LOLA topography and NAIF DE440 lunar orientation. Validation against
-    Diviner is tracked separately and is not claimed by this configuration.
 
 solver:
   thermal:
     time:
       dt_s: 120.0
-    batch_size_faces: 25000
   illumination:
     solar_disk_samples: 64
     point_source_mode: false
@@ -43,3 +41,6 @@ time_range:
   output_interval_s: 3600.0
   spinup_cycles: 3
   spinup_convergence_tolerance_K: 0.1
+
+resources:
+  max_memory_mb: 6144.0              # research grids need a workstation

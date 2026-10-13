@@ -1,31 +1,34 @@
-"""Simulation Runner — time-stepping loop for illumination + thermal.
+"""Simulation runner: terrain → shadows → heat conduction, step by step.
 
-Orchestrates the full simulation pipeline:
-1. Generate / load DEM → mesh → BVH
-2. Initialize thermal columns (one per face)
-3. Time loop: ephemeris → illumination → heat equation → store results
-4. Return results for visualization
+One run does the following:
+
+1. Build the terrain mesh from a real or synthetic DEM, lowered onto the
+   lunar sphere, and work out how the mesh axes sit in the Moon's body frame.
+2. Estimate the memory the run needs and refuse to start above the limit.
+3. Build the BVH, optional terrain view factors, roughness and Hapke tables.
+4. March in time. Each step asks the Sun source for a body-frame direction,
+   rotates it onto the mesh, traces shadows, and advances every regolith
+   column in one parallel call.
+5. Keep running statistics (min/max/mean surface temperature, mean
+   illumination) instead of a full-mesh copy per output step, so memory does
+   not grow with run length. Snapshots, if wanted, stream to disk.
+
+Absorbed solar flux on a facet is
+
+    Q_solar = (1 − A(μ)) · S(t) · ⟨max(0, n·s_k) · V_k⟩_k
+
+where the average runs over solar-disk samples s_k with visibility V_k, and
+A(μ) is the Hapke directional-hemispherical albedo (or the Bond albedo when
+Hapke is off).
 
 Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
-
-Notes
------
-The Q_solar absorbed by each face is:
-
-    Q_solar = (1 − A) · S₀ · cos(θ_incidence) · f_illum
-
-where:
-- A = bond albedo
-- S₀ = solar constant (1361 W/m²)
-- θ_incidence = angle between face normal and sun direction
-- f_illum = illumination fraction [0, 1] from raytracer
-
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -34,91 +37,146 @@ from typing import Any
 import numpy as np
 
 from core_engine.constants import SimulationConfig
+from core_engine.frames import MeshFrame, frame_for_dem
 from core_engine.illumination import IlluminationEngine
 from core_engine.mesh import TriangleMesh, dem_to_mesh
-from data_ingestion.synthetic_dem import generate_synthetic_dem
+from data_ingestion.ephemeris import SunSource, SyntheticSun
+from data_ingestion.synthetic_dem import DEMData, generate_synthetic_dem
 from thermal_solver.crank_nicolson import CrankNicolsonSolver, create_thermal_column
 
 logger = logging.getLogger(__name__)
 
+EPHEMERIS_MODES = ("synthetic", "skyfield", "spice")
+
+
+class RunCancelledError(RuntimeError):
+    """Raised when a caller asks a running simulation to stop."""
+
 
 # ---------------------------------------------------------------------------
-# Result Container
+# Results
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class SimulationResults:
-    """Container for simulation output data.
+    """Everything a run produces.
 
-    Attributes
-    ----------
-    times : list[datetime]
-        UTC timestamps for each output snapshot.
-    surface_temps : list[np.ndarray]
-        Surface temperature maps [K] at each snapshot. Each: (num_faces,).
-    illumination_maps : list[np.ndarray]
-        Illumination fractions at each snapshot. Each: (num_faces,).
-    sun_elevations : list[float]
-        Sun elevation [deg] at each timestep.
-    probe_temps : dict[str, list[float]]
-        Temperature time series for named probe locations.
-    face_centroids : np.ndarray
-        Face centroid coordinates. Shape: (num_faces, 3).
-    face_areas : np.ndarray
-        Face areas [m²]. Shape: (num_faces,).
-    metadata : dict
-        Simulation metadata (config, timing, etc.).
-
+    Per-face arrays have shape ``(num_faces,)``; time series have one entry
+    per output step (``times``, ``sun_elevations``) or per time step
+    (``probe_temps``).
     """
 
+    final_surface_T: np.ndarray
+    final_illumination: np.ndarray
+    min_surface_T: np.ndarray
+    max_surface_T: np.ndarray
+    mean_surface_T: np.ndarray
+    mean_illumination: np.ndarray
+    face_centroids: np.ndarray
+    face_normals: np.ndarray
+    face_areas: np.ndarray
+    dem_elevation: np.ndarray
+    dem_x: np.ndarray
+    dem_y: np.ndarray
     times: list[datetime] = field(default_factory=list)
-    surface_temps: list[np.ndarray] = field(default_factory=list)
-    illumination_maps: list[np.ndarray] = field(default_factory=list)
     sun_elevations: list[float] = field(default_factory=list)
+    sun_azimuths: list[float] = field(default_factory=list)
     probe_temps: dict[str, list[float]] = field(default_factory=dict)
-    face_centroids: np.ndarray = field(default_factory=lambda: np.array([]))
-    face_areas: np.ndarray = field(default_factory=lambda: np.array([]))
-    dem_elevation: np.ndarray = field(default_factory=lambda: np.array([]))
-    metadata: dict = field(default_factory=dict)
+    probe_faces: dict[str, int] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def grid_shape(self) -> tuple[int, int]:
+        """Cell grid (rows, cols) of the DEM the mesh came from."""
+        return (len(self.dem_y) - 1, len(self.dem_x) - 1)
 
 
-# ---------------------------------------------------------------------------
-# Probe Location
-# ---------------------------------------------------------------------------
-
-
-@dataclass
+@dataclass(frozen=True)
 class ProbeLocation:
-    """A named temperature probe at a specific mesh face.
-
-    Attributes
-    ----------
-    name : str
-        Human-readable name (e.g., "crater_floor", "rim_east").
-    face_index : int
-        Index into the mesh face arrays.
-
-    """
+    """A named temperature probe at one mesh face."""
 
     name: str
     face_index: int
 
 
+@dataclass(frozen=True)
+class RunProgress:
+    """Progress report handed to the optional callback once per step."""
+
+    step: int
+    total_steps: int
+    phase: str
+    sim_time: datetime
+    sun_elevation_deg: float
+    surface_min_K: float
+    surface_max_K: float
+    elapsed_s: float
+
+    @property
+    def fraction(self) -> float:
+        """Completed fraction in [0, 1]."""
+        return self.step / max(self.total_steps, 1)
+
+
+ProgressCallback = Callable[[RunProgress], None]
+StopCheck = Callable[[], bool]
+
+
 # ---------------------------------------------------------------------------
-# Simulation Runner
+# Memory estimate
+# ---------------------------------------------------------------------------
+
+
+def estimate_run_memory_mb(
+    num_faces: int,
+    config: SimulationConfig,
+    view_factors: bool | None = None,
+) -> dict[str, float]:
+    """Approximate peak memory of a run, broken down by component [MB].
+
+    The numbers are deliberately a little pessimistic. They cover the mesh,
+    the BVH (including its build buffers), the dense thermal state, the
+    per-step work arrays and, when enabled, the sparse view-factor matrix
+    and its Monte-Carlo buffers.
+    """
+    f8 = 8.0
+    nodes = config.solver.grid.num_layers + 1
+    use_vf = config.view_factors.enabled if view_factors is None else view_factors
+    parts = {
+        "mesh": num_faces * (0.5 * 24 + 24 + 24 + 24 + 8),
+        "bvh": num_faces * (72 + 2 * 64 + 8 + 3 * f8),
+        "thermal_state": num_faces * nodes * f8,
+        "work_arrays": num_faces * 14 * f8,
+        "view_factors": 0.0,
+    }
+    if use_vf:
+        width = min(config.view_factors.num_rays, config.view_factors.max_neighbors)
+        parts["view_factors"] = num_faces * width * (8 + 8) * 2.0
+    mb = {key: value / 1e6 for key, value in parts.items()}
+    mb["total"] = sum(mb.values())
+    return mb
+
+
+def faces_for_dem_shape(ny: int, nx: int) -> int:
+    """Number of triangles a ``ny × nx`` DEM turns into."""
+    return 2 * max(ny - 1, 0) * max(nx - 1, 0)
+
+
+# ---------------------------------------------------------------------------
+# Runner
 # ---------------------------------------------------------------------------
 
 
 class SimulationRunner:
-    """Main simulation runner orchestrating illumination + thermal solver.
+    """Run illumination and heat conduction over a terrain patch.
 
     Parameters
     ----------
     config : SimulationConfig
-        Full simulation configuration loaded from YAML.
+        Full simulation configuration.
     crater_radius_m : float, optional
-        Override crater radius [m]. If None, uses config value.
+        Override for the synthetic crater radius.
 
     """
 
@@ -127,34 +185,77 @@ class SimulationRunner:
         config: SimulationConfig,
         crater_radius_m: float | None = None,
     ) -> None:
-        self._config = config
-
-        # Override crater radius if specified
         if crater_radius_m is not None:
-            # Mutate config (not frozen — SimulationConfig is mutable)
-            self._config = replace(
+            config = replace(
                 config,
                 synthetic_dem=replace(config.synthetic_dem, radius_m=crater_radius_m),
             )
+        self._config = config
 
-        # Derived constants
-        self._solar_constant = self._config.constants.solar_constant
-        self._albedo = self._config.surface.bond_albedo
-        self._emissivity = self._config.surface.thermal_emissivity
-        self._sigma = self._config.constants.stefan_boltzmann
-        self._dt = self._config.solver.dt_s
+    @property
+    def config(self) -> SimulationConfig:
+        """The configuration this runner uses."""
+        return self._config
 
-        logger.info(
-            "SimulationRunner initialized: S₀=%.0f W/m², A=%.2f, dt=%.0fs",
-            self._solar_constant, self._albedo, self._dt,
+    # -- validation -------------------------------------------------------
+
+    def _check_research_mode(
+        self,
+        external_dem: DEMData | None,
+        ephemeris_mode: str,
+        spinup_cycles: int,
+    ) -> None:
+        research = self._config.research
+        if not research.enabled:
+            return
+        if ephemeris_mode != "spice":
+            raise ValueError(
+                "Research mode requires the SPICE ephemeris; "
+                f"'{ephemeris_mode}' was requested."
+            )
+        if research.require_real_dem and external_dem is None:
+            raise ValueError("Research mode requires a real DEM; synthetic terrain is refused.")
+        if (
+            research.require_dem_provenance
+            and external_dem is not None
+            and not external_dem.metadata.get("provenance_verified", False)
+        ):
+            raise ValueError("Research mode requires a provenance-verified DEM.")
+        if spinup_cycles < research.minimum_spinup_cycles:
+            raise ValueError(
+                f"Research mode requires at least {research.minimum_spinup_cycles} "
+                "spin-up cycles."
+            )
+
+    def _sun_source(self, mode: str, start_time: datetime, frame: MeshFrame) -> SunSource:
+        eph = self._config.ephemeris
+        if mode == "skyfield":
+            from data_ingestion.ephemeris import SolarEphemeris
+
+            return SolarEphemeris(kernel_name=eph.kernel_name, data_dir=eph.data_dir)
+        if mode == "spice":
+            from data_ingestion.spice_ephemeris import SpiceSolarEphemeris
+
+            return SpiceSolarEphemeris(
+                eph.kernel_files,
+                frame=eph.frame,
+                aberration_correction=eph.aberration_correction,
+            )
+        return SyntheticSun(
+            start_time=start_time,
+            target_lon_deg=frame.longitude_deg,
+            subsolar_lat_deg=eph.synthetic_subsolar_lat_deg,
+            synodic_period_s=self._config.lunar.synodic_period_s,
         )
+
+    # -- main loop --------------------------------------------------------
 
     def run(
         self,
         start_time: datetime,
         duration_hours: float = 24.0,
         dt_s: float | None = None,
-        output_interval_s: float = 3600.0,
+        output_interval_s: float | None = None,
         num_probes: int = 3,
         point_source_mode: bool | None = None,
         ephemeris_mode: str | None = None,
@@ -162,515 +263,421 @@ class SimulationRunner:
         longitude_deg: float | None = None,
         spinup_cycles: int | None = None,
         save_data: bool = True,
-        output_dir: Path | str = "output",
-        external_dem=None,
+        output_dir: Path | str | None = None,
+        external_dem: DEMData | None = None,
+        progress: ProgressCallback | None = None,
+        should_stop: StopCheck | None = None,
     ) -> SimulationResults:
-        """Execute the simulation time loop.
+        """Run the simulation and return its results.
 
-        Parameters
-        ----------
-        start_time : datetime
-            UTC start time.
-        duration_hours : float
-            Simulation duration in hours.
-        dt_s : float, optional
-            Override time step [s]. Default: from config.
-        output_interval_s : float
-            Save output every N seconds.
-        num_probes : int
-            Number of temperature probe locations to track.
-        point_source_mode : bool, optional
-            Override illumination mode.
-
-        Returns
-        -------
-        SimulationResults
-            All output data.
-
+        ``progress`` is called after every time step; ``should_stop`` is
+        polled as well and, when it returns True, the run raises
+        :class:`RunCancelledError`. Both are meant for the desktop app.
         """
-        if dt_s is None:
-            dt_s = self._dt
-
-        if spinup_cycles is None:
-            spinup_cycles = self._config.time_range.spinup_cycles
+        cfg = self._config
+        dt_s = cfg.solver.dt_s if dt_s is None else float(dt_s)
+        if dt_s <= 0:
+            raise ValueError("dt must be positive.")
+        if dt_s > cfg.solver.max_dt_s:
+            raise ValueError(
+                f"dt = {dt_s:g} s exceeds solver.thermal.time.max_dt_s = "
+                f"{cfg.solver.max_dt_s:g} s."
+            )
+        if duration_hours <= 0:
+            raise ValueError("duration must be positive.")
+        output_interval_s = (
+            cfg.time_range.output_interval_s if output_interval_s is None else output_interval_s
+        )
+        if output_interval_s <= 0:
+            raise ValueError("output interval must be positive.")
+        spinup_cycles = cfg.time_range.spinup_cycles if spinup_cycles is None else spinup_cycles
         if spinup_cycles < 0:
             raise ValueError("spinup_cycles cannot be negative.")
-        if self._config.research.enabled:
-            research = self._config.research
-            if research.require_real_dem and external_dem is None:
-                raise ValueError(
-                    "Research mode requires a real external DEM; "
-                    "synthetic terrain is forbidden."
-                )
-            if (
-                research.require_dem_provenance
-                and external_dem is not None
-                and not external_dem.metadata.get("provenance_verified", False)
-            ):
-                raise ValueError("Research mode requires a provenance-verified DEM.")
-            if spinup_cycles < research.minimum_spinup_cycles:
-                raise ValueError(
-                    "Research mode requires at least "
-                    f"{research.minimum_spinup_cycles} spin-up cycles."
-                )
-        production_steps = int(duration_hours * 3600.0 / dt_s)
-        steps_per_cycle = max(1, round(self._config.lunar.synodic_period_s / dt_s))
+        solar_mode = ephemeris_mode or cfg.ephemeris.mode
+        if solar_mode not in EPHEMERIS_MODES:
+            raise ValueError(f"ephemeris mode must be one of {', '.join(EPHEMERIS_MODES)}.")
+        self._check_research_mode(external_dem, solar_mode, spinup_cycles)
+
+        production_steps = max(1, int(round(duration_hours * 3600.0 / dt_s)))
+        steps_per_cycle = max(1, round(cfg.lunar.synodic_period_s / dt_s))
         spinup_steps = spinup_cycles * steps_per_cycle
         num_steps = spinup_steps + production_steps
-        output_every = max(1, int(output_interval_s / dt_s))
-
-        logger.info(
-            "Starting simulation: %s → +%.1f hours (%d steps, dt=%.0fs)",
-            start_time.isoformat(),
-            duration_hours,
-            num_steps,
-            dt_s,
-        )
-
-        # Step 1: Generate or load DEM
+        output_every = max(1, int(round(output_interval_s / dt_s)))
         wall_start = time.perf_counter()
-        if external_dem is not None:
-            logger.info("Step 1/4: Using external DEM (%s)...",
-                        external_dem.metadata.get("type", "unknown"))
-            dem = external_dem
-        else:
-            logger.info("Step 1/4: Generating synthetic DEM...")
-            dem = generate_synthetic_dem(self._config.synthetic_dem)
-        mesh = dem_to_mesh(dem)
-        num_faces = mesh.face_centroids.shape[0]
-        thermal_peak_mb = (
-            (
-                num_faces
-                + min(num_faces, self._config.solver.batch_size_faces)
-            )
-            * (self._config.solver.grid.num_layers + 1)
-            * np.dtype(np.float64).itemsize
-            / 1e6
+
+        # 1. Terrain and frames ------------------------------------------
+        dem = external_dem if external_dem is not None else generate_synthetic_dem(
+            cfg.synthetic_dem
         )
-        if thermal_peak_mb > self._config.solver.max_state_memory_mb:
+        target_lat = cfg.target.latitude_deg if latitude_deg is None else latitude_deg
+        target_lon = cfg.target.longitude_deg if longitude_deg is None else longitude_deg
+        frame = frame_for_dem(dem.metadata, target_lat, target_lon, cfg.lunar.radius_m)
+        num_faces = faces_for_dem_shape(*dem.elevation.shape)
+
+        memory = estimate_run_memory_mb(num_faces, cfg)
+        if memory["total"] > cfg.resources.max_memory_mb:
             raise MemoryError(
-                "Thermal-state preflight requires approximately "
-                f"{thermal_peak_mb:.0f} MB, above the configured "
-                f"{self._config.solver.max_state_memory_mb:.0f} MB limit. "
-                "Reduce DEM resolution/layers or explicitly raise "
-                "solver.thermal.max_state_memory_mb."
+                f"This run needs about {memory['total']:.0f} MB "
+                f"({num_faces:,} faces), above resources.max_memory_mb = "
+                f"{cfg.resources.max_memory_mb:.0f} MB. Use a coarser grid "
+                "(synthetic_dem.grid_resolution_m or a downsampled DEM), turn off "
+                "view factors, or raise the limit if the machine has the room."
             )
 
-        # Step 2: Build illumination engine
-        logger.info("Step 2/4: Building illumination engine...")
+        mesh = dem_to_mesh(
+            dem, curvature_radius_m=cfg.lunar.radius_m if cfg.terrain.curvature else None
+        )
+        logger.info(
+            "Terrain: %d faces, frame=%s at %.3f°, %.3f°; estimated memory %.0f MB",
+            num_faces, frame.kind, frame.latitude_deg, frame.longitude_deg, memory["total"],
+        )
+
+        # 2. Shadows, view factors, optics -------------------------------
         use_point_source = (
-            point_source_mode
-            if point_source_mode is not None
-            else self._config.illumination.point_source_mode
+            cfg.illumination.point_source_mode if point_source_mode is None else point_source_mode
         )
-        solar_mode = ephemeris_mode or self._config.ephemeris.mode
-        if solar_mode not in {"synthetic", "skyfield", "spice"}:
-            raise ValueError("ephemeris_mode must be 'synthetic', 'skyfield', or 'spice'.")
-        target_lat = (
-            self._config.target.latitude_deg if latitude_deg is None else latitude_deg
-        )
-        target_lon = (
-            self._config.target.longitude_deg if longitude_deg is None else longitude_deg
-        )
-        ephemeris: Any = None
-        if solar_mode == "skyfield":
-            from data_ingestion.ephemeris import SolarEphemeris
-
-            ephemeris = SolarEphemeris(
-                kernel_name=self._config.ephemeris.kernel_name,
-                data_dir=self._config.ephemeris.data_dir,
-            )
-        elif solar_mode == "spice":
-            from data_ingestion.spice_ephemeris import SpiceSolarEphemeris
-
-            ephemeris = SpiceSolarEphemeris(
-                self._config.ephemeris.kernel_files,
-                frame=self._config.ephemeris.frame,
-                aberration_correction=self._config.ephemeris.aberration_correction,
-            )
+        sun_source = self._sun_source(solar_mode, start_time, frame)
         engine = IlluminationEngine(
             mesh=mesh,
-            solar_angular_radius_rad=self._config.lunar.solar_angular_radius_rad,
-            num_samples=self._config.illumination.solar_disk_samples,
+            solar_angular_radius_rad=cfg.lunar.solar_angular_radius_rad,
+            num_samples=cfg.illumination.solar_disk_samples,
             point_source_mode=use_point_source,
-            epsilon=self._config.raytracer.epsilon,
-            max_leaf_triangles=self._config.raytracer.max_leaf_triangles,
+            epsilon=cfg.raytracer.epsilon,
+            max_leaf_triangles=cfg.raytracer.max_leaf_triangles,
+            sah_num_bins=cfg.raytracer.sah_num_bins,
         )
 
-        # Step 2.5: Compute view factors for IR scattering
         view_factors = None
-        if self._config.view_factors.enabled:
-            vf_cfg = self._config.view_factors
-            logger.info(
-                "Step 2.5/5: Computing view factors "
-                "(Monte Carlo, %d rays/face)...", vf_cfg.num_rays,
-            )
+        if cfg.view_factors.enabled:
             from core_engine.view_factors import compute_view_factor_matrix
 
-            bvh_nodes, tri_verts, ordered_indices = engine.get_bvh_data()
+            vf = cfg.view_factors
+            bvh_nodes, tri_verts, ordered = engine.get_bvh_data()
             view_factors = compute_view_factor_matrix(
-                    face_centroids=mesh.face_centroids,
-                    face_normals=mesh.face_normals,
-                    face_areas=mesh.face_areas,
-                    bvh_nodes=bvh_nodes,
-                    tri_verts=tri_verts,
-                    ordered_tri_indices=ordered_indices,
-                    mesh_triangles=mesh.triangles,
-                    num_rays=vf_cfg.num_rays,
-                    max_neighbors=vf_cfg.max_neighbors,
-                    max_memory_mb=vf_cfg.max_memory_mb,
-                    epsilon=self._config.raytracer.epsilon,
-                    seed=vf_cfg.seed,
-                    reciprocity_tol=vf_cfg.reciprocity_tolerance,
-                )
-            logger.info(
-                    "View factors ready: %d nnz, %.1f MB",
-                    view_factors.nnz, view_factors.memory_mb,
-                )
-        else:
-            logger.info("View factors disabled by config.")
+                face_centroids=mesh.face_centroids,
+                face_normals=mesh.face_normals,
+                face_areas=mesh.face_areas,
+                bvh_nodes=bvh_nodes,
+                tri_verts=tri_verts,
+                ordered_tri_indices=ordered,
+                mesh_triangles=mesh.triangles,
+                num_rays=vf.num_rays,
+                max_neighbors=vf.max_neighbors,
+                max_memory_mb=vf.max_memory_mb,
+                epsilon=cfg.raytracer.epsilon,
+                seed=vf.seed,
+                reciprocity_tol=vf.reciprocity_tolerance,
+            )
 
-        # Step 2.7: Precompute roughness correction (geometry-only)
-        roughness_emissivity = np.full(num_faces, self._emissivity)
-        hapke_enabled = self._config.hapke.enabled
-        roughness_enabled = self._config.roughness.enabled
-        rms_slope_deg = self._config.roughness.rms_slope_deg
+        emissivity = np.full(num_faces, cfg.surface.thermal_emissivity)
+        if cfg.roughness.enabled:
+            from core_engine.roughness import compute_roughness_correction
 
-        if roughness_enabled:
             try:
-                from core_engine.roughness import compute_roughness_correction
-                roughness_emissivity = compute_roughness_correction(
+                emissivity = compute_roughness_correction(
                     face_normals=mesh.face_normals,
-                    epsilon_0=self._emissivity,
-                    rms_slope_deg=rms_slope_deg,
-                    K=self._config.roughness.cavity_coefficient,
+                    epsilon_0=cfg.surface.thermal_emissivity,
+                    rms_slope_deg=cfg.roughness.rms_slope_deg,
+                    K=cfg.roughness.cavity_coefficient,
                 )
-                logger.info(
-                    "Roughness correction applied: ε_eff range [%.4f, %.4f] "
-                    "(ε₀=%.2f, θ̄=%.1f°)",
-                    roughness_emissivity.min(), roughness_emissivity.max(),
-                    self._emissivity, rms_slope_deg,
-                )
-            except Exception as e:
-                logger.warning(
-                    "Roughness correction failed, using flat emissivity: %s", e
-                )
+            except Exception:
+                if cfg.research.enabled:
+                    raise
+                logger.warning("Roughness correction failed; using flat emissivity.",
+                               exc_info=True)
 
-        # Hapke parameters (loaded from config or defaults)
-        hapke_w = self._config.hapke.single_scattering_albedo
-        hapke_b = self._config.hapke.b
-        hapke_c = self._config.hapke.c
-        hapke_B_SH0 = self._config.hapke.b_sh0
-        hapke_h_s = self._config.hapke.h_s
-        hapke_mu_grid = None
-        hapke_albedo_grid = None
-        if hapke_enabled:
+        hapke_mu = hapke_albedo = None
+        if cfg.hapke.enabled:
             from core_engine.reflectance import compute_adh_array
 
-            hapke_mu_grid = np.linspace(0.0, 1.0, self._config.hapke.lookup_size)
-            hapke_albedo_grid = compute_adh_array(
-                hapke_mu_grid,
-                w=hapke_w,
-                b=hapke_b,
-                c=hapke_c,
-                B_SH0=hapke_B_SH0,
-                h_s=hapke_h_s,
+            hapke_mu = np.linspace(0.0, 1.0, cfg.hapke.lookup_size)
+            hapke_albedo = compute_adh_array(
+                hapke_mu,
+                w=cfg.hapke.single_scattering_albedo,
+                b=cfg.hapke.b,
+                c=cfg.hapke.c,
+                B_SH0=cfg.hapke.b_sh0,
+                h_s=cfg.hapke.h_s,
             )
 
-        # Step 3: Initialize thermal solver + columns
-        logger.info("Step 3/5: Initializing thermal solver (%d columns)...", num_faces)
-        solver = CrankNicolsonSolver(self._config)
-        template_column = create_thermal_column(self._config)
-
-        # Dense state removes millions of Python objects and shares the
-        # immutable vertical grid across all independent 1-D columns.
-        temperatures = np.broadcast_to(
-            template_column.T,
-            (num_faces, template_column.T.size),
-        ).copy()
+        # 3. Thermal state -----------------------------------------------
+        solver = CrankNicolsonSolver(cfg)
+        column = create_thermal_column(cfg)
+        temperatures = np.broadcast_to(column.T, (num_faces, column.T.size)).copy()
+        if cfg.solver.initial_condition == "equilibrium":
+            t_eq = self._equilibrium_temperature(
+                engine, sun_source, frame, start_time, emissivity,
+            )
+            temperatures[:] = t_eq[:, None]
         previous_cycle_surface = temperatures[:, 0].copy()
-        spinup_cycle_deltas_k: list[float] = []
+        spinup_deltas: list[float] = []
 
-        # Set up probe locations
         probes = self._select_probes(mesh, num_probes)
-        results = SimulationResults(
-            face_centroids=mesh.face_centroids,
-            face_areas=mesh.face_areas,
-            dem_elevation=dem.elevation,
-            metadata={
-                "config_crater_radius_m": self._config.synthetic_dem.radius_m,
-                "config_depth_m": self._config.synthetic_dem.depth_m,
-                "num_faces": num_faces,
-                "num_steps": production_steps,
-                "total_compute_steps": num_steps,
-                "spinup_cycles": spinup_cycles,
-                "spinup_steps": spinup_steps,
-                "dt_s": dt_s,
-                "start_time": start_time.isoformat(),
-                "duration_hours": duration_hours,
-                "point_source_mode": use_point_source,
-                "ephemeris_mode": solar_mode,
-                "target_latitude_deg": target_lat,
-                "target_longitude_deg": target_lon,
-                "research_mode": self._config.research.enabled,
-                "dem_provenance": dem.metadata.get("provenance"),
-            },
+        stats_min = np.full(num_faces, np.inf)
+        stats_max = np.full(num_faces, -np.inf)
+        stats_sum = np.zeros(num_faces)
+        illum_sum = np.zeros(num_faces)
+        stats_count = 0
+
+        out_dir = Path(output_dir if output_dir is not None else cfg.output.directory)
+        snapshots = _SnapshotWriter.create(
+            out_dir if save_data else None,
+            num_faces=num_faces,
+            num_frames=-(-production_steps // output_every),
+            budget_mb=cfg.output.max_snapshot_mb,
         )
-        if solar_mode == "spice" and ephemeris is not None:
-            results.metadata["ephemeris_provenance"] = ephemeris.provenance
-        for p in probes:
-            results.probe_temps[p.name] = []
 
-        # Step 4: Time loop
-        logger.info("Step 4/5: Running time loop (%d steps)...", num_steps)
+        results_times: list[datetime] = []
+        sun_elevations: list[float] = []
+        sun_azimuths: list[float] = []
+        probe_temps: dict[str, list[float]] = {p.name: [] for p in probes}
+        q_ir = np.zeros(num_faces)
+        illumination = np.zeros(num_faces)
+        sun_elev_deg = 0.0
+
+        # 4. Time loop ---------------------------------------------------
         current_time = start_time - timedelta(seconds=spinup_steps * dt_s)
-
         for step_i in range(num_steps):
+            if should_stop is not None and should_stop():
+                raise RunCancelledError(f"Stopped at step {step_i} of {num_steps}.")
             output_step = step_i - spinup_steps
-            # 4a: Compute sun direction
-            # Use a synthetic sun that rises from 0° and sweeps over 24h
-            # This models a synodic period at the pole
-            phase = (step_i * dt_s) / (self._config.lunar.synodic_period_s)
-            sun_elevation_rad = np.radians(
-                1.5 * np.sin(2 * np.pi * phase)  # max 1.5° elevation
-            )
-            sun_azimuth_rad = 2 * np.pi * phase
 
-            # Convert spherical to Cartesian (in local frame: z=up, x=north)
-            cos_el = np.cos(sun_elevation_rad)
-            sun_dir = np.array([
-                cos_el * np.cos(sun_azimuth_rad),
-                cos_el * np.sin(sun_azimuth_rad),
-                np.sin(sun_elevation_rad),
-            ], dtype=np.float64)
-            sun_dir /= np.linalg.norm(sun_dir)
-
-            # 4b: Distance-corrected solar flux (inverse-square law)
-            # S(t) = S₀ × (1 AU / d_sun)² — varies ±3.4% over year
-            # For synthetic sun, use fixed S₀ (real ephemeris would use
-            # get_solar_flux() with actual UTC time)
-            solar_flux_t = self._solar_constant
-            if ephemeris is not None:
-                sun_state = ephemeris.get_sun_state(
-                    current_time,
-                    lat_deg=target_lat,
-                    lon_deg=target_lon,
-                    S_0=self._solar_constant,
-                )
-                sun_dir = np.asarray(sun_state["direction"], dtype=np.float64)
-                solar_flux_t = float(sun_state["solar_flux"])
-
-            # 4c: Compute illumination
+            sun = sun_source.sun_state(current_time, cfg.constants.solar_constant)
+            sun_dir = frame.from_body(sun.direction_body)
             illum_result = engine.compute(sun_dir)
             illumination = illum_result.illumination
-            projected_solar_factor = illum_result.projected_solar_factor
             sun_elev_deg = illum_result.sun_elevation_deg
 
-            # 4d: Compute absorbed solar flux per face
-            # Q_solar = [1 − A_DH(θ_i)] · S(t) · cos(θ_i) · f_illum
-            cos_incidence = np.maximum(
-                0.0,
-                np.einsum("ij,j->i", mesh.face_normals, sun_dir),
-            )
-
-            # Hapke: angle-dependent directional-hemispherical albedo
-            if hapke_enabled:
-                assert hapke_mu_grid is not None
-                assert hapke_albedo_grid is not None
-                A_DH = np.interp(cos_incidence, hapke_mu_grid, hapke_albedo_grid)
-                Q_solar_per_face = (
-                    (1.0 - A_DH)
-                    * solar_flux_t
-                    * projected_solar_factor
-                )
+            absorptance: np.ndarray | float
+            if hapke_mu is not None and hapke_albedo is not None:
+                mu = np.maximum(mesh.face_normals @ sun_dir, 0.0)
+                absorptance = 1.0 - np.interp(mu, hapke_mu, hapke_albedo)
             else:
-                Q_solar_per_face = (
-                    (1.0 - self._albedo)
-                    * solar_flux_t
-                    * projected_solar_factor
-                )
+                absorptance = 1.0 - cfg.surface.bond_albedo
+            q_solar = absorptance * sun.solar_flux * illum_result.projected_solar_factor
 
-            # 4e: Compute IR flux from terrain (view factor radiosity)
-            Q_ir_per_face = np.zeros(num_faces, dtype=np.float64)
             if view_factors is not None:
-                surface_T_current = temperatures[:, 0]
                 from core_engine.view_factors import compute_ir_flux_gray
-                Q_ir_per_face = compute_ir_flux_gray(
-                    surface_T_current,
+
+                q_ir = compute_ir_flux_gray(
+                    temperatures[:, 0],
                     view_factors.row_ptr,
                     view_factors.col_idx,
                     view_factors.values,
-                    roughness_emissivity,
-                    self._sigma,
+                    emissivity,
+                    cfg.constants.stefan_boltzmann,
                 )
 
-            # 4f: Advance all independent columns in one parallel call.
             solver.step_batch(
-                temperatures,
-                template_column.z,
-                template_column.dz,
-                template_column.dz_bar,
-                Q_solar_per_face,
-                q_ir=Q_ir_per_face,
-                emissivities=roughness_emissivity,
-                dt=dt_s,
+                temperatures, column.z, column.dz, column.dz_bar,
+                q_solar, q_ir=q_ir, emissivities=emissivity, dt=dt_s,
             )
-            state_time = current_time + timedelta(seconds=dt_s)
+            current_time = current_time + timedelta(seconds=dt_s)
+            surface = temperatures[:, 0]
 
-            if step_i < spinup_steps and (step_i + 1) % steps_per_cycle == 0:
-                cycle_surface = temperatures[:, 0]
-                cycle_delta = float(
-                    np.max(np.abs(cycle_surface - previous_cycle_surface))
-                )
-                spinup_cycle_deltas_k.append(cycle_delta)
-                previous_cycle_surface = cycle_surface.copy()
-                logger.info(
-                    "Spin-up cycle %d/%d: max surface delta=%.4f K",
-                    len(spinup_cycle_deltas_k),
-                    spinup_cycles,
-                    cycle_delta,
-                )
-
-            # 4e: Record probe temperatures every step
-            if output_step >= 0:
-                for p in probes:
-                    results.probe_temps[p.name].append(
-                        float(temperatures[p.face_index, 0])
-                    )
-
-            # 4f: Save output snapshots at intervals
-            if output_step >= 0 and output_step % output_every == 0:
-                surface_T = temperatures[:, 0].copy()
-                results.times.append(state_time)
-                results.surface_temps.append(surface_T)
-                results.illumination_maps.append(illumination.copy())
-                results.sun_elevations.append(sun_elev_deg)
-
-            # Progress logging
-            if step_i % max(1, num_steps // 10) == 0:
-                surface_T_snap = temperatures[:, 0]
-                logger.info(
-                    "  Step %d/%d (t=%.1f hrs): "
-                    "sun_elev=%.2f°, T_min=%.1f K, T_max=%.1f K, T_mean=%.1f K",
-                    step_i, num_steps,
-                    step_i * dt_s / 3600.0,
-                    sun_elev_deg,
-                    surface_T_snap.min(),
-                    surface_T_snap.max(),
-                    surface_T_snap.mean(),
-                )
-
-            current_time = state_time
-
-        # Always capture the final state
-        if production_steps > 0:
-            final_surface_T = temperatures[:, 0].copy()
-            # Avoid duplicate if last step was already an output step
-            if (production_steps - 1) % output_every != 0:
-                results.times.append(current_time)
-                results.surface_temps.append(final_surface_T)
-                results.illumination_maps.append(illumination.copy())
-                results.sun_elevations.append(sun_elev_deg)
+            if step_i < spinup_steps:
+                if (step_i + 1) % steps_per_cycle == 0:
+                    delta = float(np.max(np.abs(surface - previous_cycle_surface)))
+                    spinup_deltas.append(delta)
+                    previous_cycle_surface = surface.copy()
+                    logger.info("Spin-up cycle %d/%d: max surface change %.4f K",
+                                len(spinup_deltas), spinup_cycles, delta)
             else:
-                # Update the last snapshot with the final state
-                results.surface_temps[-1] = final_surface_T
+                np.minimum(stats_min, surface, out=stats_min)
+                np.maximum(stats_max, surface, out=stats_max)
+                stats_sum += surface
+                illum_sum += illumination
+                stats_count += 1
+                for probe in probes:
+                    probe_temps[probe.name].append(float(surface[probe.face_index]))
+                is_last = step_i == num_steps - 1
+                if (output_step + 1) % output_every == 0 or is_last:
+                    results_times.append(current_time)
+                    sun_elevations.append(sun_elev_deg)
+                    sun_azimuths.append(float(np.degrees(np.arctan2(sun_dir[0], sun_dir[1]))))
+                    snapshots.write(surface, illumination)
 
-        wall_elapsed = time.perf_counter() - wall_start
-        results.metadata["wall_time_s"] = wall_elapsed
-        results.metadata["steps_per_second"] = num_steps / wall_elapsed
-        results.metadata["spinup_cycle_max_delta_K"] = spinup_cycle_deltas_k
-        if spinup_cycle_deltas_k:
-            tolerance = self._config.time_range.spinup_convergence_tolerance_k
-            converged = spinup_cycle_deltas_k[-1] <= tolerance
-            results.metadata["spinup_converged"] = converged
-            if not converged:
-                logger.warning(
-                    "Spin-up did not meet %.3f K tolerance; final cycle delta=%.3f K",
-                    tolerance,
-                    spinup_cycle_deltas_k[-1],
+            if progress is not None:
+                progress(RunProgress(
+                    step=step_i + 1,
+                    total_steps=num_steps,
+                    phase="spin-up" if step_i < spinup_steps else "production",
+                    sim_time=current_time,
+                    sun_elevation_deg=sun_elev_deg,
+                    surface_min_K=float(surface.min()),
+                    surface_max_K=float(surface.max()),
+                    elapsed_s=time.perf_counter() - wall_start,
+                ))
+            if step_i % max(1, num_steps // 10) == 0:
+                logger.info(
+                    "Step %d/%d: sun %.2f°, T %.1f–%.1f K",
+                    step_i + 1, num_steps, sun_elev_deg, surface.min(), surface.max(),
                 )
 
-        logger.info(
-            "Simulation complete: %.1f seconds wall time (%.1f steps/s)",
-            wall_elapsed,
-            num_steps / wall_elapsed,
-        )
+        snapshots.close()
+        wall = time.perf_counter() - wall_start
 
-        # Save raw data for re-rendering
-        if save_data and results.surface_temps:
+        metadata: dict[str, Any] = {
+            "num_faces": num_faces,
+            "grid_shape": [len(dem.y_coords) - 1, len(dem.x_coords) - 1],
+            "resolution_m": dem.resolution_m,
+            "num_steps": production_steps,
+            "total_compute_steps": num_steps,
+            "spinup_cycles": spinup_cycles,
+            "spinup_steps": spinup_steps,
+            "spinup_cycle_max_delta_K": spinup_deltas,
+            "dt_s": dt_s,
+            "output_interval_s": output_every * dt_s,
+            "start_time": start_time.isoformat(),
+            "duration_hours": duration_hours,
+            "point_source_mode": use_point_source,
+            "ephemeris_mode": solar_mode,
+            "frame": frame.describe(),
+            "curvature": cfg.terrain.curvature,
+            "research_mode": cfg.research.enabled,
+            "dem_type": dem.metadata.get("type"),
+            "dem_provenance": dem.metadata.get("provenance"),
+            "crater_radius_m": cfg.synthetic_dem.radius_m if external_dem is None else None,
+            "hapke": cfg.hapke.enabled,
+            "roughness": cfg.roughness.enabled,
+            "view_factors": cfg.view_factors.enabled,
+            "volatile_thresholds_K": [
+                cfg.volatiles.stable_threshold_k,
+                cfg.volatiles.marginal_threshold_k,
+            ],
+            "estimated_memory_mb": memory,
+            "snapshot_frames": snapshots.frames_written,
+            "snapshot_stride": snapshots.stride,
+            "wall_time_s": wall,
+            "steps_per_second": num_steps / wall if wall > 0 else 0.0,
+        }
+        if spinup_deltas:
+            converged = spinup_deltas[-1] <= cfg.time_range.spinup_convergence_tolerance_k
+            metadata["spinup_converged"] = converged
+            if not converged:
+                logger.warning("Spin-up did not converge: last cycle changed by %.3f K.",
+                               spinup_deltas[-1])
+        if hasattr(sun_source, "provenance"):
+            metadata["ephemeris_provenance"] = sun_source.provenance
+
+        count = max(stats_count, 1)
+        results = SimulationResults(
+            final_surface_T=temperatures[:, 0].copy(),
+            final_illumination=illumination.copy(),
+            min_surface_T=stats_min,
+            max_surface_T=stats_max,
+            mean_surface_T=stats_sum / count,
+            mean_illumination=illum_sum / count,
+            face_centroids=mesh.face_centroids,
+            face_normals=mesh.face_normals,
+            face_areas=mesh.face_areas,
+            dem_elevation=dem.elevation,
+            dem_x=dem.x_coords,
+            dem_y=dem.y_coords,
+            times=results_times,
+            sun_elevations=sun_elevations,
+            sun_azimuths=sun_azimuths,
+            probe_temps=probe_temps,
+            probe_faces={p.name: p.face_index for p in probes},
+            metadata=metadata,
+        )
+        logger.info("Run finished in %.1f s (%.1f steps/s).", wall, metadata["steps_per_second"])
+
+        if save_data:
             from simulation.io_manager import save_results
 
-            save_results(
-                output_dir=output_dir,
-                surface_temps=results.surface_temps[-1],
-                illumination=results.illumination_maps[-1],
-                dem_elevation=results.dem_elevation,
-                face_centroids=results.face_centroids,
-                face_areas=results.face_areas,
-                probe_temps=results.probe_temps,
-                sun_elevations=results.sun_elevations,
-                metadata=results.metadata,
-            )
-
+            save_results(out_dir, results)
         return results
 
-    def _select_probes(
+    def _equilibrium_temperature(
         self,
-        mesh: TriangleMesh,
-        num_probes: int,
-    ) -> list[ProbeLocation]:
-        """Select representative probe locations on the mesh.
+        engine: IlluminationEngine,
+        sun_source: SunSource,
+        frame: MeshFrame,
+        start_time: datetime,
+        emissivity: np.ndarray,
+        samples: int = 24,
+    ) -> np.ndarray:
+        """Per-face temperature that radiates away the day-mean absorbed flux.
 
-        Selects:
-        - crater_floor: face closest to the center (lowest elevation)
-        - crater_rim: face near the rim (highest elevation)
-        - mid_slope: face at mid-depth between floor and rim
-
-        Parameters
-        ----------
-        mesh : TriangleMesh
-            Terrain mesh.
-        num_probes : int
-            Number of probes (up to 3).
-
-        Returns
-        -------
-        list[ProbeLocation]
-            Named probe locations.
-
+        The Sun is sampled at ``samples`` instants spread over one synodic
+        month with point-source shadows. Starting from here instead of a
+        uniform guess removes most of the initial transient, so short runs
+        without spin-up do not report the start temperature as their maximum.
+        Columns are set isothermal; spin-up still matters for research runs.
         """
-        centroids = mesh.face_centroids
-        z = centroids[:, 2]
-        r = np.sqrt(centroids[:, 0] ** 2 + centroids[:, 1] ** 2)
+        cfg = self._config
+        period = cfg.lunar.synodic_period_s
+        mean_flux = np.zeros_like(emissivity)
+        for k in range(samples):
+            when = start_time + timedelta(seconds=period * k / samples)
+            sun = sun_source.sun_state(when, cfg.constants.solar_constant)
+            lit = engine.compute(frame.from_body(sun.direction_body), point_source_override=True)
+            mean_flux += sun.solar_flux * lit.projected_solar_factor
+        mean_flux *= (1.0 - cfg.surface.bond_albedo) / samples
+        q = mean_flux + cfg.regolith.geothermal_flux
+        return (q / (emissivity * cfg.constants.stefan_boltzmann)) ** 0.25
 
-        probes: list[ProbeLocation] = []
+    @staticmethod
+    def _select_probes(mesh: TriangleMesh, num_probes: int) -> list[ProbeLocation]:
+        """Pick the lowest face, the highest face and one at mid-height."""
+        z = mesh.face_centroids[:, 2]
+        probes = [
+            ProbeLocation("floor", int(np.argmin(z))),
+            ProbeLocation("rim", int(np.argmax(z))),
+            ProbeLocation("mid_slope", int(np.argmin(np.abs(z - 0.5 * (z.min() + z.max()))))),
+        ]
+        return probes[: max(0, min(num_probes, 3))]
 
-        if num_probes >= 1:
-            # Floor: lowest z, closest to center
-            floor_idx = int(np.argmin(z))
-            probes.append(ProbeLocation("crater_floor", floor_idx))
-            logger.info(
-                "Probe 'crater_floor': face %d at z=%.1f m, r=%.1f m",
-                floor_idx, z[floor_idx], r[floor_idx],
-            )
 
-        if num_probes >= 2:
-            # Rim: highest z
-            rim_idx = int(np.argmax(z))
-            probes.append(ProbeLocation("crater_rim", rim_idx))
-            logger.info(
-                "Probe 'crater_rim': face %d at z=%.1f m, r=%.1f m",
-                rim_idx, z[rim_idx], r[rim_idx],
-            )
+class _SnapshotWriter:
+    """Streams per-output surface temperature and illumination to disk.
 
-        if num_probes >= 3:
-            # Mid-slope: median elevation
-            z_mid = (z.min() + z.max()) / 2.0
-            mid_idx = int(np.argmin(np.abs(z - z_mid)))
-            probes.append(ProbeLocation("mid_slope", mid_idx))
-            logger.info(
-                "Probe 'mid_slope': face %d at z=%.1f m, r=%.1f m",
-                mid_idx, z[mid_idx], r[mid_idx],
-            )
+    Frames are stored as float32 in memory-mapped ``.npy`` files. If the
+    run would exceed the size budget, every k-th frame is kept instead.
+    """
 
-        return probes
+    def __init__(self, temps: Any, illum: Any, stride: int) -> None:
+        self._temps = temps
+        self._illum = illum
+        self.stride = stride
+        self._seen = 0
+        self.frames_written = 0
+
+    @classmethod
+    def create(
+        cls,
+        output_dir: Path | None,
+        num_faces: int,
+        num_frames: int,
+        budget_mb: float,
+    ) -> _SnapshotWriter:
+        if output_dir is None or budget_mb <= 0 or num_faces == 0:
+            return cls(None, None, 1)
+        frame_mb = 2 * num_faces * 4 / 1e6
+        stride = max(1, int(np.ceil(num_frames * frame_mb / budget_mb)))
+        kept = (num_frames + stride - 1) // stride
+        output_dir.mkdir(parents=True, exist_ok=True)
+        open_memmap = np.lib.format.open_memmap
+        temps = open_memmap(output_dir / "snapshots_surface_T.npy", mode="w+",
+                            dtype=np.float32, shape=(kept, num_faces))
+        illum = open_memmap(output_dir / "snapshots_illumination.npy", mode="w+",
+                            dtype=np.float32, shape=(kept, num_faces))
+        if stride > 1:
+            logger.info("Snapshot budget: keeping every %d-th output frame.", stride)
+        return cls(temps, illum, stride)
+
+    def write(self, surface: np.ndarray, illumination: np.ndarray) -> None:
+        if self._temps is None:
+            return
+        if self._seen % self.stride == 0 and self.frames_written < self._temps.shape[0]:
+            self._temps[self.frames_written] = surface
+            self._illum[self.frames_written] = illumination
+            self.frames_written += 1
+        self._seen += 1
+
+    def close(self) -> None:
+        for array in (self._temps, self._illum):
+            if array is not None:
+                array.flush()
+        self._temps = self._illum = None

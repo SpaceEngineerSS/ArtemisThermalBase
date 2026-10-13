@@ -40,6 +40,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numba import njit
 
+from core_engine.raytracer import _STACK_SIZE, _closest
+
 if TYPE_CHECKING:
     prange = range
 else:
@@ -124,58 +126,33 @@ def _cosine_weighted_hemisphere_sample(
     return dx, dy, dz
 
 
-@njit(cache=True)
+@njit(cache=True, inline="always")
 def _local_to_world(
     dx: float, dy: float, dz: float,
-    normal: np.ndarray,
-) -> np.ndarray:
-    """Transform a direction from local (normal-aligned) to world frame.
-
-    Constructs a tangent-space basis from the surface normal using the
-    method that avoids singularities at the poles.
-
-    Parameters
-    ----------
-    dx, dy, dz : float
-        Direction in local frame (z = normal).
-    normal : np.ndarray
-        Unit surface normal. Shape: (3,).
-
-    Returns
-    -------
-    np.ndarray
-        Direction in world frame. Shape: (3,).
-
-    """
-    # Build orthonormal basis (tangent, bitangent, normal)
-    # Choose reference axis that is least aligned with normal
-    if abs(normal[0]) < 0.9:
-        ref = np.array([1.0, 0.0, 0.0])
+    nx: float, ny: float, nz: float,
+) -> tuple[float, float, float]:
+    """Rotate a direction from the normal-aligned frame into the world frame."""
+    if abs(nx) < 0.9:
+        rx, ry, rz = 1.0, 0.0, 0.0
     else:
-        ref = np.array([0.0, 1.0, 0.0])
-
-    # tangent = normalize(ref × normal)
-    t0 = ref[1] * normal[2] - ref[2] * normal[1]
-    t1 = ref[2] * normal[0] - ref[0] * normal[2]
-    t2 = ref[0] * normal[1] - ref[1] * normal[0]
+        rx, ry, rz = 0.0, 1.0, 0.0
+    t0 = ry * nz - rz * ny
+    t1 = rz * nx - rx * nz
+    t2 = rx * ny - ry * nx
     t_len = np.sqrt(t0 * t0 + t1 * t1 + t2 * t2)
     if t_len < 1e-30:
         t_len = 1.0
     t0 /= t_len
     t1 /= t_len
     t2 /= t_len
-
-    # bitangent = normal × tangent
-    b0 = normal[1] * t2 - normal[2] * t1
-    b1 = normal[2] * t0 - normal[0] * t2
-    b2 = normal[0] * t1 - normal[1] * t0
-
-    # Transform: world_dir = dx*tangent + dy*bitangent + dz*normal
-    result = np.empty(3, dtype=np.float64)
-    result[0] = dx * t0 + dy * b0 + dz * normal[0]
-    result[1] = dx * t1 + dy * b1 + dz * normal[1]
-    result[2] = dx * t2 + dy * b2 + dz * normal[2]
-    return result
+    b0 = ny * t2 - nz * t1
+    b1 = nz * t0 - nx * t2
+    b2 = nx * t1 - ny * t0
+    return (
+        dx * t0 + dy * b0 + dz * nx,
+        dx * t1 + dy * b1 + dz * ny,
+        dx * t2 + dy * b2 + dz * nz,
+    )
 
 
 # ===================================================================
@@ -196,7 +173,7 @@ def _compute_view_factors_mc(
     max_neighbors: int,
     epsilon: float,
     seed: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute sparse view factors using Monte Carlo hemisphere sampling.
 
     For each face i, shoots num_rays cosine-weighted random rays into
@@ -234,10 +211,10 @@ def _compute_view_factors_mc(
         View factor values. Shape: (total_nnz,).
     row_counts : np.ndarray
         Number of non-zero entries per face. Shape: (N,).
+    dropped : np.ndarray
+        Hits per face that did not fit in ``max_neighbors``. Shape: (N,).
 
     """
-    from core_engine.raytracer import _closest_hit_bvh
-
     num_faces = face_centroids.shape[0]
 
     # Pre-allocate per-face hit buffers
@@ -254,6 +231,7 @@ def _compute_view_factors_mc(
         (num_faces, max_neighbors), dtype=np.float64
     )
     row_counts = np.zeros(num_faces, dtype=np.int64)
+    dropped = np.zeros(num_faces, dtype=np.int64)
 
     inv_num_rays = 1.0 / float(num_rays)
 
@@ -261,11 +239,11 @@ def _compute_view_factors_mc(
         # Per-face RNG (deterministic from seed + face index)
         rng_state = np.uint64(seed * 2654435761 + i * 1103515245 + 12345)
 
-        normal = face_normals[i]
-        origin = np.empty(3, dtype=np.float64)
-        origin[0] = face_centroids[i, 0] + normal[0] * epsilon * 100.0
-        origin[1] = face_centroids[i, 1] + normal[1] * epsilon * 100.0
-        origin[2] = face_centroids[i, 2] + normal[2] * epsilon * 100.0
+        nx, ny, nz = face_normals[i, 0], face_normals[i, 1], face_normals[i, 2]
+        ox = face_centroids[i, 0] + nx * epsilon * 100.0
+        oy = face_centroids[i, 1] + ny * epsilon * 100.0
+        oz = face_centroids[i, 2] + nz * epsilon * 100.0
+        stack = np.empty(_STACK_SIZE, dtype=np.int64)
 
         # Local hit counter — accumulate hits per neighbor face
         # Use a simple hash map approximation with linear probing
@@ -290,13 +268,10 @@ def _compute_view_factors_mc(
             # Cosine-weighted hemisphere sample
             dx, dy, dz = _cosine_weighted_hemisphere_sample(u1, u2)
 
-            # Transform to world frame
-            ray_dir = _local_to_world(dx, dy, dz, normal)
-
-            # Closest-hit ray query
-            hit_tri, hit_t = _closest_hit_bvh(
-                origin, ray_dir, bvh_nodes, tri_verts,
-                ordered_tri_indices, epsilon,
+            wx, wy, wz = _local_to_world(dx, dy, dz, nx, ny, nz)
+            hit_tri, _hit_t = _closest(
+                ox, oy, oz, wx, wy, wz, bvh_nodes, tri_verts,
+                ordered_tri_indices, epsilon, stack,
             )
 
             if hit_tri < 0:
@@ -314,10 +289,13 @@ def _compute_view_factors_mc(
                     found = True
                     break
 
-            if not found and n_unique < max_neighbors:
-                local_idx[n_unique] = hit_face
-                local_count[n_unique] = 1
-                n_unique += 1
+            if not found:
+                if n_unique < max_neighbors:
+                    local_idx[n_unique] = hit_face
+                    local_count[n_unique] = 1
+                    n_unique += 1
+                else:
+                    dropped[i] += 1
 
         # Write results for this face
         row_counts[i] = n_unique
@@ -325,7 +303,7 @@ def _compute_view_factors_mc(
             all_neighbor_idx[i, k] = local_idx[k]
             all_neighbor_val[i, k] = float(local_count[k]) * inv_num_rays
 
-    return all_neighbor_idx, all_neighbor_val, row_counts
+    return all_neighbor_idx, all_neighbor_val, row_counts, dropped
 
 
 # ===================================================================
@@ -434,7 +412,7 @@ def compute_view_factor_matrix(
     max_memory_mb: float = 2048.0,
     epsilon: float = 1e-10,
     seed: int = 42,
-    reciprocity_tol: float = 1e-5,
+    reciprocity_tol: float = 0.05,
 ) -> ViewFactorMatrix:
     """Compute the sparse view factor matrix for a triangle mesh.
 
@@ -462,7 +440,7 @@ def compute_view_factor_matrix(
     seed : int
         Random seed for reproducibility.
     reciprocity_tol : float
-        Tolerance for reciprocity validation.
+        Allowed area-weighted reciprocity asymmetry before warning.
 
     Returns
     -------
@@ -501,9 +479,8 @@ def compute_view_factor_matrix(
 
     wall_start = time.perf_counter()
 
-    # Monte Carlo view factor computation
     logger.info("Computing view factors (Monte Carlo, %d rays/face)...", num_rays)
-    neighbor_idx, neighbor_val, row_counts = _compute_view_factors_mc(
+    neighbor_idx, neighbor_val, row_counts, dropped = _compute_view_factors_mc(
         face_centroids=face_centroids,
         face_normals=face_normals,
         face_areas=face_areas,
@@ -516,120 +493,97 @@ def compute_view_factor_matrix(
         epsilon=epsilon,
         seed=seed,
     )
-
-    # Compact into CSR format
-    total_nnz = int(row_counts.sum())
-    row_ptr = np.zeros(num_faces + 1, dtype=np.int64)
-    col_idx_csr = np.empty(total_nnz, dtype=np.int64)
-    values_csr = np.empty(total_nnz, dtype=np.float64)
-
-    ptr = 0
-    for i in range(num_faces):
-        row_ptr[i] = ptr
-        n = int(row_counts[i])
-        for k in range(n):
-            col_idx_csr[ptr] = neighbor_idx[i, k]
-            values_csr[ptr] = neighbor_val[i, k]
-            ptr += 1
-    row_ptr[num_faces] = ptr
-
-    wall_elapsed = time.perf_counter() - wall_start
-
+    row_ptr, col_idx_csr, values_csr = _compact_csr(neighbor_idx, neighbor_val, row_counts)
+    del neighbor_idx, neighbor_val
     vf = ViewFactorMatrix(
         row_ptr=row_ptr,
         col_idx=col_idx_csr,
         values=values_csr,
         num_faces=num_faces,
     )
-
     logger.info(
-        "View factors computed: %d nnz entries (%.1f MB), %.1f seconds",
-        vf.nnz, vf.memory_mb, wall_elapsed,
+        "View factors: %d non-zeros (%.1f MB) in %.1f s",
+        vf.nnz, vf.memory_mb, time.perf_counter() - wall_start,
     )
 
-    # Validate row sums (should be <= 1.0 for energy conservation)
-    row_sums = np.zeros(num_faces, dtype=np.float64)
-    for i in range(num_faces):
-        for k in range(row_ptr[i], row_ptr[i + 1]):
-            row_sums[i] += values_csr[k]
-
-    max_row_sum = row_sums.max()
-    mean_row_sum = row_sums.mean()
-    logger.info(
-        "Row sum stats: mean=%.4f, max=%.4f (should be <= 1.0)",
-        mean_row_sum, max_row_sum,
-    )
-
-    if max_row_sum > 1.0 + 0.05:
+    total_dropped = int(dropped.sum())
+    if total_dropped:
+        lost = total_dropped / (num_faces * num_rays)
         logger.warning(
-            "Max row sum %.4f exceeds 1.05 — possible Monte Carlo bias "
-            "or geometry issue.",
-            max_row_sum,
+            "%d faces hit more than max_neighbors=%d distinct faces; %.2f %% of "
+            "terrain-IR rays were dropped. Raise view_factors.max_neighbors if "
+            "this matters for your case.",
+            int(np.count_nonzero(dropped)), max_neighbors, 100.0 * lost,
         )
 
-    # Validate reciprocity: A_i * F_ij ≈ A_j * F_ji
-    reciprocity_errors = _check_reciprocity(
-        row_ptr, col_idx_csr, values_csr, face_areas, reciprocity_tol,
+    row_sums = np.add.reduceat(values_csr, row_ptr[:-1]) if vf.nnz else np.zeros(1)
+    row_sums[np.diff(row_ptr) == 0] = 0.0
+    if row_sums.max() > 1.05:
+        logger.warning("Largest view-factor row sum is %.3f (> 1.05).", row_sums.max())
+
+    asymmetry = _reciprocity_asymmetry(
+        row_ptr, col_idx_csr, values_csr, face_areas, max(1, num_faces // 2000),
     )
-    if reciprocity_errors > 0:
-        pct = 100.0 * reciprocity_errors / max(total_nnz, 1)
+    if asymmetry > reciprocity_tol:
         logger.warning(
-            "Reciprocity violations: %d / %d entries (%.1f%%) exceed "
-            "tolerance %.1e",
-            reciprocity_errors, total_nnz, pct, reciprocity_tol,
+            "View-factor reciprocity: area-weighted asymmetry %.3f exceeds %.3f. "
+            "More rays per face will reduce it.", asymmetry, reciprocity_tol,
         )
     else:
-        logger.info("Reciprocity validation passed (tol=%.1e).", reciprocity_tol)
-
+        logger.info("View-factor reciprocity asymmetry %.3f (tolerance %.3f).",
+                    asymmetry, reciprocity_tol)
     return vf
 
 
-def _check_reciprocity(
+@njit(cache=True)
+def _compact_csr(
+    neighbor_idx: np.ndarray,
+    neighbor_val: np.ndarray,
+    row_counts: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Pack the padded per-face neighbour buffers into CSR arrays."""
+    num_faces = row_counts.shape[0]
+    row_ptr = np.zeros(num_faces + 1, dtype=np.int64)
+    for i in range(num_faces):
+        row_ptr[i + 1] = row_ptr[i] + row_counts[i]
+    nnz = row_ptr[num_faces]
+    col_idx = np.empty(nnz, dtype=np.int64)
+    values = np.empty(nnz, dtype=np.float64)
+    for i in range(num_faces):
+        base = row_ptr[i]
+        for k in range(row_counts[i]):
+            col_idx[base + k] = neighbor_idx[i, k]
+            values[base + k] = neighbor_val[i, k]
+    return row_ptr, col_idx, values
+
+
+@njit(cache=True)
+def _reciprocity_asymmetry(
     row_ptr: np.ndarray,
     col_idx: np.ndarray,
     values: np.ndarray,
     face_areas: np.ndarray,
-    tol: float,
-) -> int:
-    """Check A_i * F_ij ≈ A_j * F_ji for all non-zero entries.
+    row_stride: int,
+) -> float:
+    """Area-weighted reciprocity error Σ|A_i F_ij − A_j F_ji| / Σ A_i F_ij.
 
-    Parameters
-    ----------
-    row_ptr, col_idx, values : np.ndarray
-        CSR matrix data.
-    face_areas : np.ndarray
-        Face areas [m²].
-    tol : float
-        Relative tolerance for reciprocity check.
-
-    Returns
-    -------
-    int
-        Number of entries violating reciprocity.
-
+    Individual Monte-Carlo entries are too noisy to test one by one, so we
+    measure the aggregate over every ``row_stride``-th row.
     """
-    num_faces = len(face_areas)
-    violations = 0
-
-    for i in range(num_faces):
-        A_i = face_areas[i]
+    num_faces = face_areas.shape[0]
+    diff = 0.0
+    total = 0.0
+    for i in range(0, num_faces, row_stride):
         for k in range(row_ptr[i], row_ptr[i + 1]):
             j = col_idx[k]
-            F_ij = values[k]
-            A_j = face_areas[j]
-
-            # Find F_ji in row j
-            F_ji = 0.0
+            f_ji = 0.0
             for m in range(row_ptr[j], row_ptr[j + 1]):
                 if col_idx[m] == i:
-                    F_ji = values[m]
+                    f_ji = values[m]
                     break
-
-            # Check: |A_i * F_ij - A_j * F_ji| / max(...) < tol
-            lhs = A_i * F_ij
-            rhs = A_j * F_ji
-            denom = max(abs(lhs), abs(rhs), 1e-30)
-            if abs(lhs - rhs) / denom > tol:
-                violations += 1
-
-    return violations
+            lhs = face_areas[i] * values[k]
+            diff += abs(lhs - face_areas[j] * f_ji)
+            total += lhs
+    if total <= 0.0:
+        return 0.0
+    return diff / total

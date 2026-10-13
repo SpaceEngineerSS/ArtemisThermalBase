@@ -1,534 +1,256 @@
-"""Solar ephemeris for the Lunar South Pole.
+"""Sun position sources.
 
-Computes the Sun's position vector relative to any point on the Moon's
-surface using the Skyfield library with JPL DE421 (or DE440) ephemeris
-kernels. Accounts for lunar libration via Skyfield's high-precision
-planetary orientation model.
+Every source returns the Moon-to-Sun direction in the lunar body-fixed frame
+(+z north pole, +x toward 0°E) together with the Sun distance. Turning that
+into the terrain frame is the job of :mod:`core_engine.frames`, so the three
+sources below cannot disagree about axis conventions.
+
+``SyntheticSun``
+    Analytical preview: the sub-solar point moves once around the Moon per
+    synodic month at a fixed latitude. No data files needed.
+``SolarEphemeris``
+    Skyfield with a JPL DE kernel for the Moon→Sun vector (ICRF) and the IAU
+    2015 rotation model for the Moon's orientation. Accurate to roughly
+    0.01° in orientation; good enough for previews, not for research runs.
+``SpiceSolarEphemeris`` (in :mod:`data_ingestion.spice_ephemeris`)
+    NAIF SPICE with the DE440 lunar PA/ME kernels. The research path.
 
 Author: Mehmet Gümüş (github.com/SpaceEngineerSS)
 
 References
 ----------
-- Folkner, W.M. et al. (2014). "The Planetary and Lunar Ephemerides
-  DE430 and DE431." IPN Progress Report 42-196.
-- Archinal, B.A. et al. (2018). "Report of the IAU Working Group on
-  Cartographic Coordinates and Rotational Elements: 2015."
-  Celestial Mechanics and Dynamical Astronomy, 130, 22.
-
-Notes
------
-The coordinate chain is:
-
-    Sun [ICRF/J2000] → Moon-centered ICRF → Selenographic (body-fixed)
-    → South Pole local Cartesian (x=toward λ=0, y=toward λ=90°, z=up)
-
-Skyfield handles the full chain including lunar libration, light-time
-correction, and aberration via its `observe().apparent()` pipeline.
-
-Data Management
----------------
-Ephemeris kernel files (*.bsp) are large (~17 MB for DE421). The
-``SolarEphemeris`` class automatically manages kernel downloads to
-a configurable data directory and logs the location. These files
-should be added to ``.gitignore``.
+- Archinal, B.A. et al. (2018). Report of the IAU Working Group on
+  Cartographic Coordinates and Rotational Elements: 2015. Celest. Mech.
+  Dyn. Astr. 130, 22.
+- Park, R.S. et al. (2021). The JPL Planetary and Lunar Ephemerides DE440
+  and DE441. AJ 161, 105.
 
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
+from core_engine.frames import synthetic_sun_body
+
 logger = logging.getLogger(__name__)
 
+AU_M = 149_597_870_700.0
+_J2000 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+
+@dataclass(frozen=True)
+class SunState:
+    """Sun geometry at one instant, in the lunar body-fixed frame."""
+
+    direction_body: np.ndarray
+    distance_m: float
+    solar_flux: float
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+class SunSource(Protocol):
+    """Anything that can report the Sun's position for a UTC time."""
+
+    def sun_state(self, utc_time: datetime, solar_constant: float) -> SunState:
+        """Return the Sun state at ``utc_time``."""
+        ...
+
+
+def _as_utc(utc_time: datetime) -> datetime:
+    if utc_time.tzinfo is None:
+        return utc_time.replace(tzinfo=UTC)
+    return utc_time.astimezone(UTC)
+
+
 # ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-_DEFAULT_DATA_DIR = Path("data")
-_DEFAULT_KERNEL = "de421.bsp"
-
-# IAU lunar radius [m]
-_LUNAR_RADIUS_M: float = 1_737_400.0
-
-
-# ---------------------------------------------------------------------------
-# Solar Ephemeris Class
+# Synthetic preview source
 # ---------------------------------------------------------------------------
 
 
-class SolarEphemeris:
-    """High-precision solar ephemeris for the Lunar South Pole.
-
-    Computes the Sun's direction vector in a local Cartesian frame
-    at any point on the Moon's surface, at any given UTC time.
-
-    The class lazily loads the JPL kernel file and caches it for
-    subsequent calls.
+class SyntheticSun:
+    """Analytical Sun for runs without ephemeris data.
 
     Parameters
     ----------
-    kernel_name : str
-        JPL ephemeris kernel filename (default: 'de421.bsp').
-    data_dir : Path or str
-        Directory for storing downloaded kernel files.
-
-    Examples
-    --------
-    >>> eph = SolarEphemeris()
-    >>> sun_dir = eph.get_sun_direction_local(
-    ...     utc_time=datetime(2025, 1, 15, 12, 0, tzinfo=timezone.utc),
-    ...     lat_deg=-89.54,
-    ...     lon_deg=129.78,
-    ... )
-    >>> print(sun_dir)  # (x, y, z) unit vector in local frame
+    start_time : datetime
+        Reference time at which the Sun is at local noon over the target.
+    target_lon_deg : float
+        Longitude of the terrain centre.
+    subsolar_lat_deg : float
+        Fixed sub-solar latitude. Negative values favour the south pole
+        (southern summer); the physical range is about ±1.54°.
+    synodic_period_s : float
+        Length of one lunar day.
 
     """
 
     def __init__(
         self,
-        kernel_name: str = _DEFAULT_KERNEL,
-        data_dir: Path | str = _DEFAULT_DATA_DIR,
+        start_time: datetime,
+        target_lon_deg: float,
+        subsolar_lat_deg: float,
+        synodic_period_s: float,
     ) -> None:
-        self._kernel_name = kernel_name
-        self._data_dir = Path(data_dir)
-        self._data_dir.mkdir(parents=True, exist_ok=True)
-
-        # Lazily loaded
-        self._ephemeris: Any = None
-        self._timescale: Any = None
-        self._sun: Any = None
-        self._moon: Any = None
-        self._loaded = False
-
-    def _ensure_loaded(self) -> None:
-        """Load ephemeris kernel, downloading if necessary."""
-        if self._loaded:
-            return
-
-        try:
-            from skyfield.api import Loader
-        except ImportError as e:
-            raise ImportError(
-                "skyfield is required for ephemeris computation. "
-                "Install it with: pip install skyfield"
-            ) from e
-
-        loader = Loader(str(self._data_dir), verbose=True)
-        kernel_path = self._data_dir / self._kernel_name
-
-        if kernel_path.exists():
-            logger.info("Loading ephemeris kernel from: %s", kernel_path)
-        else:
-            logger.info(
-                "Ephemeris kernel not found at %s. Downloading %s (~17 MB)...",
-                kernel_path,
-                self._kernel_name,
-            )
-
-        try:
-            self._ephemeris = loader(self._kernel_name)
-        except Exception as e:
-            raise FileNotFoundError(
-                f"Failed to load or download JPL kernel '{self._kernel_name}' "
-                f"to '{self._data_dir}'. Check your internet connection.\n"
-                f"You can manually download it from:\n"
-                f"  https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/{self._kernel_name}\n"
-                f"and place it in '{self._data_dir}'."
-            ) from e
-
-        self._timescale = loader.timescale()
-        self._sun = self._ephemeris["sun"]
-        self._moon = self._ephemeris["moon"]
-        self._loaded = True
-
-        logger.info(
-            "Ephemeris loaded: %s (segments: %d)",
-            self._kernel_name,
-            len(self._ephemeris.segments),
-        )
-
-    def get_sun_direction_icrf(
-        self,
-        utc_time: datetime,
-    ) -> tuple[np.ndarray, float]:
-        """Get Sun direction relative to Moon center in ICRF frame.
-
-        Parameters
-        ----------
-        utc_time : datetime
-            UTC time (must be timezone-aware or assumed UTC).
-
-        Returns
-        -------
-        direction : np.ndarray
-            Unit vector from Moon center toward Sun in ICRF. Shape: (3,).
-        distance_m : float
-            Sun-Moon distance in meters.
-
-        """
-        self._ensure_loaded()
-
-        # Convert datetime to Skyfield Time
-        if utc_time.tzinfo is None:
-            utc_time = utc_time.replace(tzinfo=UTC)
-
-        t = self._timescale.from_datetime(utc_time)
-
-        # Moon → Sun vector in ICRF (in AU then converted to meters)
-        astrometric = self._moon.at(t).observe(self._sun)
-        position_au = astrometric.position.au  # Shape: (3,)
-
-        # Convert to meters
-        au_to_m = 1.495978707e11
-        position_m = np.array(position_au, dtype=np.float64) * au_to_m
-
-        distance_m = float(np.linalg.norm(position_m))
-        direction = position_m / distance_m
-
-        return direction, distance_m
-
-    def get_sun_direction_local(
-        self,
-        utc_time: datetime,
-        lat_deg: float = -89.67,
-        lon_deg: float = 129.78,
-        R: float = _LUNAR_RADIUS_M,
-    ) -> np.ndarray:
-        """Get Sun direction in local Cartesian frame at a surface point.
-
-        The local frame is defined as:
-        - z_local: radially outward (surface normal on a sphere)
-        - x_local: toward decreasing latitude (north) in the local
-                    meridian plane
-        - y_local: toward increasing longitude (east)
-
-        For the south pole, this simplifies to:
-        - z_up: (0, 0, −1) in body-fixed → outward
-        - x: toward λ = 0° direction (projected)
-        - y: toward λ = 90° direction
-
-        Parameters
-        ----------
-        utc_time : datetime
-            UTC observation time.
-        lat_deg : float
-            Surface latitude in degrees (negative for south).
-        lon_deg : float
-            Surface longitude in degrees.
-        R : float
-            Lunar radius in meters.
-
-        Returns
-        -------
-        sun_dir_local : np.ndarray
-            Unit vector toward the Sun in local Cartesian frame.
-            Shape: (3,). z > 0 means Sun is above horizon.
-
-        """
-        # Step 1: Sun direction in ICRF
-        sun_icrf, distance_m = self.get_sun_direction_icrf(utc_time)
-
-        # Step 2: Rotate ICRF → selenographic body-fixed
-        R_body_from_icrf = self._get_moon_rotation_matrix(utc_time)
-        sun_body = R_body_from_icrf @ sun_icrf
-
-        # Step 3: Rotate body-fixed → local tangent frame
-        R_local_from_body = _body_to_local_rotation(
-            np.radians(lat_deg), np.radians(lon_deg)
-        )
-        sun_local = R_local_from_body @ sun_body
-
-        # Normalize for safety
-        sun_local = sun_local / np.linalg.norm(sun_local)
-
-        return sun_local
-
-    def _get_moon_rotation_matrix(
-        self,
-        utc_time: datetime,
-    ) -> np.ndarray:
-        """Get the ICRF → Moon body-fixed rotation matrix.
-
-        Uses Skyfield's built-in Moon frame which accounts for
-        physical libration from the DE421 kernel.
-
-        Parameters
-        ----------
-        utc_time : datetime
-            UTC time.
-
-        Returns
-        -------
-        R : np.ndarray
-            3×3 rotation matrix. Shape: (3, 3).
-
-        """
-        self._ensure_loaded()
-
-        if utc_time.tzinfo is None:
-            utc_time = utc_time.replace(tzinfo=UTC)
-
-        t = self._timescale.from_datetime(utc_time)
-
-        # Use Skyfield's built-in Moon frame (includes libration)
-        try:
-            from skyfield.framelib import moon_frame
-
-            # The moon_frame from skyfield.framelib provides full
-            # libration-corrected body-fixed coordinates
-            R_matrix = moon_frame.rotation_at(t)
-            return np.asarray(R_matrix, dtype=np.float64)
-
-        except (ImportError, AttributeError):
-            # Fallback: Use IAU rotation model (Archinal et al., 2018)
-            logger.warning(
-                "Skyfield moon_frame not available. "
-                "Falling back to IAU analytical model."
-            )
-            return self._iau_moon_rotation(t)
-
-    def _iau_moon_rotation(self, t: Any) -> np.ndarray:
-        """IAU 2009 analytical Moon rotation model.
-
-        Computes the ICRF → body-fixed rotation matrix using the
-        IAU Working Group equations (Archinal et al., 2018).
-
-        This is a simplified model without physical libration
-        (free libration amplitude ~0.03°). The Skyfield moon_frame
-        is preferred when available.
-
-        Parameters
-        ----------
-        t : skyfield.Time
-            Skyfield time object.
-
-        Returns
-        -------
-        R : np.ndarray
-            3×3 rotation matrix ICRF → body-fixed.
-
-        """
-        # Julian centuries from J2000.0
-        T = (t.tdb - 2451545.0) / 36525.0
-        # Days from J2000.0
-        d = t.tdb - 2451545.0
-
-        # IAU 2009 pole coordinates (degrees)
-        alpha0 = 269.9949 + 0.0031 * T
-        delta0 = 66.5392 + 0.0130 * T
-        # Prime meridian (simplified, no libration terms)
-        W = 38.3213 + 13.17635815 * d
-
-        # Convert to radians
-        a0 = np.radians(alpha0)
-        d0 = np.radians(delta0)
-        w = np.radians(W % 360.0)
-
-        # R_body_from_ICRF = R_z(W) · R_x(π/2 − δ₀) · R_z(α₀ + π/2)
-        R = _Rz(w) @ _Rx(np.pi / 2.0 - d0) @ _Rz(a0 + np.pi / 2.0)
-
-        return R
-
-    def get_sun_elevation_deg(
-        self,
-        utc_time: datetime,
-        lat_deg: float = -89.67,
-        lon_deg: float = 129.78,
-    ) -> float:
-        """Get the Sun's elevation angle above the local horizon.
-
-        Parameters
-        ----------
-        utc_time : datetime
-            UTC observation time.
-        lat_deg, lon_deg : float
-            Surface location in degrees.
-
-        Returns
-        -------
-        float
-            Sun elevation in degrees. Positive = above horizon.
-
-        """
-        sun_local = self.get_sun_direction_local(utc_time, lat_deg, lon_deg)
-        elevation_rad = np.arcsin(np.clip(sun_local[2], -1.0, 1.0))
-        return float(np.degrees(elevation_rad))
-
-    def get_solar_flux(
-        self,
-        utc_time: datetime,
-        S_0: float = 1361.0,
-    ) -> float:
-        """Compute instantaneous solar flux using the inverse-square law.
-
-        The solar flux at the Moon varies with the Sun-Moon distance:
-
-            S(t) = S₀ × (1 AU / d_sun)²
-
-        At perihelion (~0.983 AU), flux is ~3.4% higher than at 1 AU.
-        At aphelion  (~1.017 AU), flux is ~3.4% lower.
-
-        Parameters
-        ----------
-        utc_time : datetime
-            UTC observation time.
-        S_0 : float
-            Solar constant at 1 AU [W/m²]. Default: 1361.0 (Kopp & Lean, 2011).
-
-        Returns
-        -------
-        float
-            Instantaneous solar flux at Moon's distance [W/m²].
-
-        """
-        _, distance_m = self.get_sun_direction_icrf(utc_time)
-        AU_m = 1.495978707e11
-        return S_0 * (AU_m / distance_m) ** 2
-
-    def get_sun_state(
-        self,
-        utc_time: datetime,
-        lat_deg: float = -89.67,
-        lon_deg: float = 129.78,
-        S_0: float = 1361.0,
-    ) -> dict:
-        """Get complete sun state in a single call (avoids duplicate computation).
-
-        Returns the sun direction vector in local frame, elevation, distance,
-        and distance-corrected solar flux.
-
-        Parameters
-        ----------
-        utc_time : datetime
-            UTC observation time.
-        lat_deg, lon_deg : float
-            Surface location in degrees.
-        S_0 : float
-            Solar constant at 1 AU [W/m²].
-
-        Returns
-        -------
-        dict
-            Keys: 'direction' (3,), 'elevation_deg' float,
-                  'distance_m' float, 'solar_flux' float.
-
-        """
-        # Step 1: Sun direction + distance in ICRF
-        sun_icrf, distance_m = self.get_sun_direction_icrf(utc_time)
-
-        # Step 2: Rotate to local frame
-        R_body_from_icrf = self._get_moon_rotation_matrix(utc_time)
-        sun_body = R_body_from_icrf @ sun_icrf
-        R_local_from_body = _body_to_local_rotation(
-            np.radians(lat_deg), np.radians(lon_deg)
-        )
-        sun_local = R_local_from_body @ sun_body
-        sun_local = sun_local / np.linalg.norm(sun_local)
-
-        # Step 3: Elevation
-        elevation_deg = float(
-            np.degrees(np.arcsin(np.clip(sun_local[2], -1.0, 1.0)))
-        )
-
-        # Step 4: Inverse-square flux
-        AU_m = 1.495978707e11
-        solar_flux = S_0 * (AU_m / distance_m) ** 2
-
-        return {
-            "direction": sun_local,
-            "elevation_deg": elevation_deg,
-            "distance_m": distance_m,
-            "solar_flux": solar_flux,
-        }
+        self._t0 = _as_utc(start_time)
+        self._lon = target_lon_deg
+        self._lat = subsolar_lat_deg
+        self._period = synodic_period_s
+
+    def sun_state(self, utc_time: datetime, solar_constant: float) -> SunState:
+        """Return the analytical Sun state at ``utc_time``."""
+        elapsed = (_as_utc(utc_time) - self._t0).total_seconds()
+        direction = synthetic_sun_body(elapsed, self._lon, self._lat, self._period)
+        return SunState(direction, AU_M, solar_constant, {"model": "synthetic"})
 
 
 # ---------------------------------------------------------------------------
-# Rotation helpers
+# IAU 2015 lunar orientation
 # ---------------------------------------------------------------------------
 
 
-def _Rx(angle: float) -> np.ndarray:
-    """Rotation matrix about x-axis."""
-    c, s = np.cos(angle), np.sin(angle)
-    return np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, c, -s],
-        [0.0, s, c],
-    ], dtype=np.float64)
+def _rot_z(angle_rad: float) -> np.ndarray:
+    """Passive (frame) rotation about z."""
+    c, s = np.cos(angle_rad), np.sin(angle_rad)
+    return np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
 
 
-def _Ry(angle: float) -> np.ndarray:
-    """Rotation matrix about y-axis."""
-    c, s = np.cos(angle), np.sin(angle)
-    return np.array([
-        [c, 0.0, s],
-        [0.0, 1.0, 0.0],
-        [-s, 0.0, c],
-    ], dtype=np.float64)
+def _rot_x(angle_rad: float) -> np.ndarray:
+    """Passive (frame) rotation about x."""
+    c, s = np.cos(angle_rad), np.sin(angle_rad)
+    return np.array([[1.0, 0.0, 0.0], [0.0, c, s], [0.0, -s, c]])
 
 
-def _Rz(angle: float) -> np.ndarray:
-    """Rotation matrix about z-axis."""
-    c, s = np.cos(angle), np.sin(angle)
-    return np.array([
-        [c, -s, 0.0],
-        [s, c, 0.0],
-        [0.0, 0.0, 1.0],
-    ], dtype=np.float64)
+def iau_moon_rotation(utc_time: datetime) -> np.ndarray:
+    """ICRF-to-body rotation of the Moon from the IAU 2015 model.
+
+    Includes the thirteen periodic terms; without them the prime meridian
+    is off by up to ~3.5°. Time is treated as TDB ≈ UTC + 69.2 s, which is
+    far below the model's own accuracy.
+    """
+    tdb_offset_s = 69.184
+    d = ((_as_utc(utc_time) - _J2000).total_seconds() + tdb_offset_s) / 86400.0
+    T = d / 36525.0
+
+    E = np.radians(
+        np.array(
+            [
+                125.045 - 0.0529921 * d,
+                250.089 - 0.1059842 * d,
+                260.008 + 13.0120009 * d,
+                176.625 + 13.3407154 * d,
+                357.529 + 0.9856003 * d,
+                311.589 + 26.4057084 * d,
+                134.963 + 13.0649930 * d,
+                276.617 + 0.3287146 * d,
+                34.226 + 1.7484877 * d,
+                15.134 - 0.1589763 * d,
+                119.743 + 0.0036096 * d,
+                239.961 + 0.1643573 * d,
+                25.053 + 12.9590088 * d,
+            ]
+        )
+    )
+    s, c = np.sin(E), np.cos(E)
+
+    alpha0 = (
+        269.9949 + 0.0031 * T
+        - 3.8787 * s[0] - 0.1204 * s[1] + 0.0700 * s[2] - 0.0172 * s[3]
+        + 0.0072 * s[5] - 0.0052 * s[9] + 0.0043 * s[12]
+    )
+    delta0 = (
+        66.5392 + 0.0130 * T
+        + 1.5419 * c[0] + 0.0239 * c[1] - 0.0278 * c[2] + 0.0068 * c[3]
+        - 0.0029 * c[5] + 0.0009 * c[6] + 0.0008 * c[9] - 0.0009 * c[12]
+    )
+    W = (
+        38.3213 + 13.17635815 * d - 1.4e-12 * d * d
+        + 3.5610 * s[0] + 0.1208 * s[1] - 0.0642 * s[2] + 0.0158 * s[3]
+        + 0.0252 * s[4] - 0.0066 * s[5] - 0.0047 * s[6] - 0.0046 * s[7]
+        + 0.0028 * s[8] + 0.0052 * s[9] + 0.0040 * s[10] + 0.0019 * s[11]
+        - 0.0044 * s[12]
+    )
+    return (
+        _rot_z(np.radians(W))
+        @ _rot_x(np.radians(90.0 - delta0))
+        @ _rot_z(np.radians(90.0 + alpha0))
+    )
 
 
-def _body_to_local_rotation(
-    lat_rad: float,
-    lon_rad: float,
-) -> np.ndarray:
-    """Compute rotation matrix from body-fixed to local tangent frame.
+# ---------------------------------------------------------------------------
+# Skyfield source
+# ---------------------------------------------------------------------------
 
-    The local tangent frame at (lat, lon) on a sphere:
-    - z_local = radially outward
-    - x_local = toward north (increasing latitude)
-    - y_local = toward east (increasing longitude)
+
+class SolarEphemeris:
+    """Skyfield-based Sun source (JPL DE kernel + IAU lunar orientation).
 
     Parameters
     ----------
-    lat_rad : float
-        Geodetic latitude in radians.
-    lon_rad : float
-        Geodetic longitude in radians.
-
-    Returns
-    -------
-    R : np.ndarray
-        3×3 rotation matrix body-fixed → local. Shape: (3, 3).
+    kernel_name : str
+        JPL ephemeris kernel filename, e.g. ``de421.bsp``.
+    data_dir : Path or str
+        Directory holding (or receiving) the kernel.
 
     """
-    cos_lat = np.cos(lat_rad)
-    sin_lat = np.sin(lat_rad)
-    cos_lon = np.cos(lon_rad)
-    sin_lon = np.sin(lon_rad)
 
-    # Radial outward unit vector in body-fixed frame
-    # r_hat = (cos_lat * cos_lon, cos_lat * sin_lon, sin_lat)
+    def __init__(
+        self,
+        kernel_name: str = "de421.bsp",
+        data_dir: Path | str = "data/ephemeris",
+    ) -> None:
+        self._kernel_name = kernel_name
+        self._data_dir = Path(data_dir)
+        self._timescale: Any = None
+        self._sun: Any = None
+        self._moon: Any = None
 
-    # North unit vector (toward increasing latitude)
-    # n_hat = (-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat)
+    def _ensure_loaded(self) -> None:
+        if self._moon is not None:
+            return
+        try:
+            from skyfield.api import Loader
+        except ImportError as exc:
+            raise ImportError(
+                "The skyfield ephemeris needs the optional 'ephemeris' extra: "
+                'pip install "artemis-thermal-base[ephemeris]"'
+            ) from exc
 
-    # East unit vector (toward increasing longitude)
-    # e_hat = (-sin_lon, cos_lon, 0)
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        loader = Loader(str(self._data_dir), verbose=False)
+        try:
+            kernel = loader(self._kernel_name)
+        except Exception as exc:
+            raise FileNotFoundError(
+                f"Could not load or download '{self._kernel_name}' into "
+                f"'{self._data_dir}'. Download it from "
+                "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/ "
+                "and place it there."
+            ) from exc
+        self._timescale = loader.timescale()
+        self._sun = kernel["sun"]
+        self._moon = kernel["moon"]
+        logger.info("Skyfield kernel loaded: %s", self._kernel_name)
 
-    # Rotation matrix: rows are the local frame axes in body-fixed coords
-    # [x_local]   [n_hat]
-    # [y_local] = [e_hat] · [body_vector]
-    # [z_local]   [r_hat]
-
-    R = np.array([
-        [-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat],  # north
-        [-sin_lon, cos_lon, 0.0],                             # east
-        [cos_lat * cos_lon, cos_lat * sin_lon, sin_lat],     # up
-    ], dtype=np.float64)
-
-    return R
+    def sun_state(self, utc_time: datetime, solar_constant: float) -> SunState:
+        """Return the Sun state at ``utc_time`` from Skyfield."""
+        self._ensure_loaded()
+        utc_time = _as_utc(utc_time)
+        t = self._timescale.from_datetime(utc_time)
+        position_m = np.asarray(
+            self._moon.at(t).observe(self._sun).position.m, dtype=np.float64
+        )
+        distance_m = float(np.linalg.norm(position_m))
+        direction_body = iau_moon_rotation(utc_time) @ (position_m / distance_m)
+        return SunState(
+            direction_body / np.linalg.norm(direction_body),
+            distance_m,
+            solar_constant * (AU_M / distance_m) ** 2,
+            {"model": "skyfield+iau2015", "kernel": self._kernel_name},
+        )

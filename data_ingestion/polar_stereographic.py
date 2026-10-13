@@ -26,7 +26,11 @@ pole) to keep the formula sign-clean:
 
     ρ = 2R · tan(π/4 − φ_abs/2)
     x = ρ · sin(λ)
-    y = −ρ · cos(λ)
+    y = ρ · cos(λ)
+
+This matches PROJ ``+proj=stere +lat_0=-90 +lon_0=0``, the CRS written by
+``tools/prepare_lola_dem.py``. Grid +x points toward 90°E and grid +y toward
+0°E, so (x, y, up) is a right-handed frame at the pole.
 
 At the south pole (φ_abs = 90°), tan(0) = 0 → (x, y) = (0, 0).
 
@@ -82,7 +86,7 @@ def forward(
     rho = 2.0 * R * np.tan(np.pi / 4.0 - phi_abs / 2.0)
 
     x = float(rho * np.sin(lam))
-    y = float(-rho * np.cos(lam))
+    y = float(rho * np.cos(lam))
 
     return x, y
 
@@ -115,7 +119,7 @@ def forward_batch(
     rho = 2.0 * R * np.tan(np.pi / 4.0 - phi_abs / 2.0)
 
     x = rho * np.sin(lam)
-    y = -rho * np.cos(lam)
+    y = rho * np.cos(lam)
 
     return x, y
 
@@ -154,7 +158,7 @@ def inverse(
     phi_abs = np.pi / 2.0 - 2.0 * np.arctan(rho / (2.0 * R))
     lat_deg = float(-np.degrees(phi_abs))  # South pole → negative latitude
 
-    lon_deg = float(np.degrees(np.arctan2(x, -y)))
+    lon_deg = float(np.degrees(np.arctan2(x, y)))
 
     return lat_deg, lon_deg
 
@@ -185,7 +189,7 @@ def inverse_batch(
     lat_deg = -np.degrees(phi_abs)  # South pole → negative
 
     # Handle rho ≈ 0 (pole) → longitude undefined
-    lon_deg = np.degrees(np.arctan2(x, -y))
+    lon_deg = np.degrees(np.arctan2(x, y))
 
     # At the exact pole, set lon = 0 by convention
     pole_mask = rho < 1e-12
@@ -204,7 +208,8 @@ def get_shackleton_center(
 ) -> dict[str, Any]:
     """Return Shackleton Crater center in both coordinate systems.
 
-    Shackleton Crater: (−89.54°, 129.78°) — Zuber et al. (2012).
+    Shackleton Crater: (−89.67°, 129.78°) — USGS Gazetteer of Planetary
+    Nomenclature, feature 5450. Matches ``config/default_config.yaml``.
 
     Parameters
     ----------
@@ -217,7 +222,7 @@ def get_shackleton_center(
         Keys: 'lat_deg', 'lon_deg', 'x_m', 'y_m', 'R_m'.
 
     """
-    lat = -89.54
+    lat = -89.67
     lon = 129.78
 
     x, y = forward(lat, lon, R)

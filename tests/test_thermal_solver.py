@@ -34,7 +34,7 @@ from thermal_solver.crank_nicolson import (
 # FIXTURES
 # ===================================================================
 
-_CONFIG_PATH = "config/default_config.yaml"
+_CONFIG_PATH = "default_config"
 
 
 @pytest.fixture

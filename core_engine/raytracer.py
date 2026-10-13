@@ -225,8 +225,174 @@ def ray_aabb_intersect(
 
 
 # ===================================================================
-# BVH TRAVERSAL — Stack-based, No Recursion (Numba JIT)
+# BVH TRAVERSAL — iterative, allocation-free (Numba JIT)
 # ===================================================================
+#
+# The hot kernels below run inside ``prange`` loops. Everything they need
+# per ray lives in scalars, and one traversal stack is shared by a chunk
+# of faces, so no heap allocation happens per ray. The build caps
+# tree depth at ``_MAX_DEPTH``, which bounds the stack.
+
+_MAX_DEPTH = 96
+_STACK_SIZE = _MAX_DEPTH + 2
+_SAH_DEPTH_LIMIT = 64  # below this depth, fall back to median splits
+_CHUNK = 256  # faces per parallel work item; one traversal stack each
+
+
+@njit(cache=True, fastmath=False, inline="always")
+def _slab_hit(
+    nodes: np.ndarray,
+    base: int,
+    ox: float, oy: float, oz: float,
+    ix: float, iy: float, iz: float,
+    t_limit: float,
+) -> bool:
+    t_min = 0.0
+    t_max = t_limit
+    t1 = (nodes[base + _BBOX_MIN_X] - ox) * ix
+    t2 = (nodes[base + _BBOX_MAX_X] - ox) * ix
+    if t1 > t2:
+        t1, t2 = t2, t1
+    t_min = max(t_min, t1)
+    t_max = min(t_max, t2)
+    if t_min > t_max:
+        return False
+    t1 = (nodes[base + _BBOX_MIN_Y] - oy) * iy
+    t2 = (nodes[base + _BBOX_MAX_Y] - oy) * iy
+    if t1 > t2:
+        t1, t2 = t2, t1
+    t_min = max(t_min, t1)
+    t_max = min(t_max, t2)
+    if t_min > t_max:
+        return False
+    t1 = (nodes[base + _BBOX_MIN_Z] - oz) * iz
+    t2 = (nodes[base + _BBOX_MAX_Z] - oz) * iz
+    if t1 > t2:
+        t1, t2 = t2, t1
+    t_min = max(t_min, t1)
+    t_max = min(t_max, t2)
+    return t_min <= t_max
+
+
+@njit(cache=True, fastmath=False, inline="always")
+def _tri_hit(
+    tri_verts: np.ndarray,
+    tri: int,
+    ox: float, oy: float, oz: float,
+    dx: float, dy: float, dz: float,
+    epsilon: float,
+) -> float:
+    """Scalar Möller-Trumbore against triangle ``tri``; same tests as above."""
+    v0x = tri_verts[tri, 0, 0]
+    v0y = tri_verts[tri, 0, 1]
+    v0z = tri_verts[tri, 0, 2]
+    e1x = tri_verts[tri, 1, 0] - v0x
+    e1y = tri_verts[tri, 1, 1] - v0y
+    e1z = tri_verts[tri, 1, 2] - v0z
+    e2x = tri_verts[tri, 2, 0] - v0x
+    e2y = tri_verts[tri, 2, 1] - v0y
+    e2z = tri_verts[tri, 2, 2] - v0z
+    px = dy * e2z - dz * e2y
+    py = dz * e2x - dx * e2z
+    pz = dx * e2y - dy * e2x
+    det = e1x * px + e1y * py + e1z * pz
+    if det > -epsilon and det < epsilon:
+        return -1.0
+    inv_det = 1.0 / det
+    tx = ox - v0x
+    ty = oy - v0y
+    tz = oz - v0z
+    u = (tx * px + ty * py + tz * pz) * inv_det
+    if u < -epsilon or u > 1.0 + epsilon:
+        return -1.0
+    qx = ty * e1z - tz * e1y
+    qy = tz * e1x - tx * e1z
+    qz = tx * e1y - ty * e1x
+    v = (dx * qx + dy * qy + dz * qz) * inv_det
+    if v < -epsilon or u + v > 1.0 + epsilon:
+        return -1.0
+    t_dist = (e2x * qx + e2y * qy + e2z * qz) * inv_det
+    if t_dist > epsilon:
+        return t_dist
+    return -1.0
+
+
+@njit(cache=True, fastmath=False, inline="always")
+def _inverse(d: float) -> float:
+    return _INF if d == 0.0 else 1.0 / d
+
+
+@njit(cache=True, fastmath=False)
+def _occluded(
+    ox: float, oy: float, oz: float,
+    dx: float, dy: float, dz: float,
+    nodes: np.ndarray,
+    tri_verts: np.ndarray,
+    ordered: np.ndarray,
+    epsilon: float,
+    stack: np.ndarray,
+) -> bool:
+    """True if the ray hits any triangle (early exit)."""
+    ix = _inverse(dx)
+    iy = _inverse(dy)
+    iz = _inverse(dz)
+    sp = 1
+    stack[0] = 0
+    while sp > 0:
+        sp -= 1
+        base = stack[sp] * _NODE_SIZE
+        if not _slab_hit(nodes, base, ox, oy, oz, ix, iy, iz, _INF):
+            continue
+        count_or_right = nodes[base + _COUNT_OR_RIGHT]
+        if count_or_right < 0:
+            start = int(nodes[base + _CHILD_OR_START])
+            for k in range(start, start - int(count_or_right)):
+                if _tri_hit(tri_verts, ordered[k], ox, oy, oz, dx, dy, dz, epsilon) > epsilon:
+                    return True
+        else:
+            stack[sp] = int(nodes[base + _CHILD_OR_START])
+            stack[sp + 1] = int(count_or_right)
+            sp += 2
+    return False
+
+
+@njit(cache=True, fastmath=False)
+def _closest(
+    ox: float, oy: float, oz: float,
+    dx: float, dy: float, dz: float,
+    nodes: np.ndarray,
+    tri_verts: np.ndarray,
+    ordered: np.ndarray,
+    epsilon: float,
+    stack: np.ndarray,
+) -> tuple[int, float]:
+    """Closest triangle hit by the ray, or (-1, INF)."""
+    ix = _inverse(dx)
+    iy = _inverse(dy)
+    iz = _inverse(dz)
+    best_t = _INF
+    best_tri = -1
+    sp = 1
+    stack[0] = 0
+    while sp > 0:
+        sp -= 1
+        base = stack[sp] * _NODE_SIZE
+        if not _slab_hit(nodes, base, ox, oy, oz, ix, iy, iz, best_t):
+            continue
+        count_or_right = nodes[base + _COUNT_OR_RIGHT]
+        if count_or_right < 0:
+            start = int(nodes[base + _CHILD_OR_START])
+            for k in range(start, start - int(count_or_right)):
+                tri = ordered[k]
+                t_hit = _tri_hit(tri_verts, tri, ox, oy, oz, dx, dy, dz, epsilon)
+                if t_hit > epsilon and t_hit < best_t:
+                    best_t = t_hit
+                    best_tri = int(tri)
+        else:
+            stack[sp] = int(nodes[base + _CHILD_OR_START])
+            stack[sp + 1] = int(count_or_right)
+            sp += 2
+    return best_tri, best_t
 
 
 @njit(cache=True, fastmath=False)
@@ -238,90 +404,13 @@ def _shadow_ray_bvh(
     ordered_tri_indices: np.ndarray,
     epsilon: float,
 ) -> bool:
-    """Test if a shadow ray is occluded by ANY triangle in the BVH.
-
-    Uses stack-based iterative traversal. Returns True on the FIRST hit
-    (early exit) since we only care about occlusion, not closest hit.
-
-    Parameters
-    ----------
-    ray_origin : np.ndarray
-        Shadow ray origin. Shape: (3,).
-    ray_dir : np.ndarray
-        Shadow ray direction (toward sun). Shape: (3,).
-    bvh_nodes : np.ndarray
-        Flattened BVH node array. Shape: (num_nodes * 8,).
-    tri_verts : np.ndarray
-        Triangle vertices. Shape: (num_triangles, 3, 3).
-    ordered_tri_indices : np.ndarray
-        Triangle indices ordered by BVH leaf assignment. Shape: (num_triangles,).
-    epsilon : float
-        Intersection epsilon.
-
-    Returns
-    -------
-    bool
-        True if the ray is occluded (hits any triangle).
-
-    """
-    # Precompute inverse direction (handles zeros via IEEE 754 inf)
-    inv_dir = np.empty(3, dtype=np.float64)
-    for axis in range(3):
-        if ray_dir[axis] == 0.0:
-            inv_dir[axis] = _INF
-        else:
-            inv_dir[axis] = 1.0 / ray_dir[axis]
-
-    # Stack for iterative traversal (max depth ~64 for any realistic BVH)
-    stack = np.empty(64, dtype=np.int64)
-    stack_ptr = 0
-    stack[stack_ptr] = 0  # Push root node index
-    stack_ptr += 1
-
-    bbox_min_tmp = np.empty(3, dtype=np.float64)
-    bbox_max_tmp = np.empty(3, dtype=np.float64)
-
-    while stack_ptr > 0:
-        stack_ptr -= 1
-        node_idx = stack[stack_ptr]
-        base = node_idx * _NODE_SIZE
-
-        # Extract AABB
-        bbox_min_tmp[0] = bvh_nodes[base + _BBOX_MIN_X]
-        bbox_min_tmp[1] = bvh_nodes[base + _BBOX_MIN_Y]
-        bbox_min_tmp[2] = bvh_nodes[base + _BBOX_MIN_Z]
-        bbox_max_tmp[0] = bvh_nodes[base + _BBOX_MAX_X]
-        bbox_max_tmp[1] = bvh_nodes[base + _BBOX_MAX_Y]
-        bbox_max_tmp[2] = bvh_nodes[base + _BBOX_MAX_Z]
-
-        # Test ray-AABB intersection
-        if not ray_aabb_intersect(ray_origin, inv_dir, bbox_min_tmp, bbox_max_tmp, _INF):
-            continue
-
-        count_or_right = bvh_nodes[base + _COUNT_OR_RIGHT]
-
-        if count_or_right < 0:
-            # LEAF NODE: test triangles
-            start = int(bvh_nodes[base + _CHILD_OR_START])
-            count = int(-count_or_right)
-            for i in range(start, start + count):
-                tri_idx = ordered_tri_indices[i]
-                v0 = tri_verts[tri_idx, 0]
-                v1 = tri_verts[tri_idx, 1]
-                v2 = tri_verts[tri_idx, 2]
-                t_hit = moller_trumbore(ray_origin, ray_dir, v0, v1, v2, epsilon)
-                if t_hit > epsilon:
-                    return True  # Early exit — shadow confirmed
-        else:
-            # INTERNAL NODE: push children
-            left = int(bvh_nodes[base + _CHILD_OR_START])
-            right = int(count_or_right)
-            stack[stack_ptr] = left
-            stack_ptr += 1
-            stack[stack_ptr] = right
-            stack_ptr += 1
-
-    return False  # No occlusion
+    """Array-argument wrapper of :func:`_occluded` for tests and tools."""
+    stack = np.empty(_STACK_SIZE, dtype=np.int64)
+    return _occluded(
+        ray_origin[0], ray_origin[1], ray_origin[2],
+        ray_dir[0], ray_dir[1], ray_dir[2],
+        bvh_nodes, tri_verts, ordered_tri_indices, epsilon, stack,
+    )
 
 
 @njit(cache=True, fastmath=False)
@@ -333,97 +422,18 @@ def _closest_hit_bvh(
     ordered_tri_indices: np.ndarray,
     epsilon: float,
 ) -> tuple[int, float]:
-    """Find the closest triangle hit by a ray using BVH traversal.
+    """Array-argument wrapper of :func:`_closest` used by view factors."""
+    stack = np.empty(_STACK_SIZE, dtype=np.int64)
+    return _closest(
+        ray_origin[0], ray_origin[1], ray_origin[2],
+        ray_dir[0], ray_dir[1], ray_dir[2],
+        bvh_nodes, tri_verts, ordered_tri_indices, epsilon, stack,
+    )
 
-    Unlike ``_shadow_ray_bvh`` which early-exits on ANY hit, this function
-    traverses the full BVH to find the CLOSEST intersection. Required for
-    view factor computation where we need to know which face a ray hits.
 
-    Parameters
-    ----------
-    ray_origin : np.ndarray
-        Ray origin. Shape: (3,).
-    ray_dir : np.ndarray
-        Ray direction (need not be normalized). Shape: (3,).
-    bvh_nodes : np.ndarray
-        Flattened BVH node array.
-    tri_verts : np.ndarray
-        Triangle vertices. Shape: (num_triangles, 3, 3).
-    ordered_tri_indices : np.ndarray
-        Triangle indices in BVH leaf order.
-    epsilon : float
-        Intersection epsilon.
-
-    Returns
-    -------
-    closest_tri_idx : int
-        Index of closest hit triangle, or -1 if no hit.
-    closest_t : float
-        Parametric distance to closest hit, or INF if no hit.
-
-    """
-    inv_dir = np.empty(3, dtype=np.float64)
-    for axis in range(3):
-        if ray_dir[axis] == 0.0:
-            inv_dir[axis] = _INF
-        else:
-            inv_dir[axis] = 1.0 / ray_dir[axis]
-
-    stack = np.empty(64, dtype=np.int64)
-    stack_ptr = 0
-    stack[stack_ptr] = 0
-    stack_ptr += 1
-
-    bbox_min_tmp = np.empty(3, dtype=np.float64)
-    bbox_max_tmp = np.empty(3, dtype=np.float64)
-
-    closest_t = _INF
-    closest_tri_idx = -1
-
-    while stack_ptr > 0:
-        stack_ptr -= 1
-        node_idx = stack[stack_ptr]
-        base = node_idx * _NODE_SIZE
-
-        bbox_min_tmp[0] = bvh_nodes[base + _BBOX_MIN_X]
-        bbox_min_tmp[1] = bvh_nodes[base + _BBOX_MIN_Y]
-        bbox_min_tmp[2] = bvh_nodes[base + _BBOX_MIN_Z]
-        bbox_max_tmp[0] = bvh_nodes[base + _BBOX_MAX_X]
-        bbox_max_tmp[1] = bvh_nodes[base + _BBOX_MAX_Y]
-        bbox_max_tmp[2] = bvh_nodes[base + _BBOX_MAX_Z]
-
-        if not ray_aabb_intersect(
-            ray_origin, inv_dir, bbox_min_tmp, bbox_max_tmp, closest_t
-        ):
-            continue
-
-        count_or_right = bvh_nodes[base + _COUNT_OR_RIGHT]
-
-        if count_or_right < 0:
-            # LEAF NODE
-            start = int(bvh_nodes[base + _CHILD_OR_START])
-            count = int(-count_or_right)
-            for i in range(start, start + count):
-                tri_idx = ordered_tri_indices[i]
-                v0 = tri_verts[tri_idx, 0]
-                v1 = tri_verts[tri_idx, 1]
-                v2 = tri_verts[tri_idx, 2]
-                t_hit = moller_trumbore(
-                    ray_origin, ray_dir, v0, v1, v2, epsilon
-                )
-                if t_hit > epsilon and t_hit < closest_t:
-                    closest_t = t_hit
-                    closest_tri_idx = int(tri_idx)
-        else:
-            # INTERNAL NODE
-            left = int(bvh_nodes[base + _CHILD_OR_START])
-            right = int(count_or_right)
-            stack[stack_ptr] = left
-            stack_ptr += 1
-            stack[stack_ptr] = right
-            stack_ptr += 1
-
-    return closest_tri_idx, closest_t
+# ===================================================================
+# SHADOW KERNELS
+# ===================================================================
 
 
 @njit(cache=True, parallel=True, fastmath=False)
@@ -436,147 +446,31 @@ def compute_shadow_map_point_source(
     ordered_tri_indices: np.ndarray,
     epsilon: float,
 ) -> np.ndarray:
-    """Compute a binary shadow map for a point-source sun.
+    """Binary shadow map (1 lit, 0 shadowed) for a point-source Sun.
 
-    For each mesh face, casts a shadow ray from its centroid toward the
-    sun and tests for occlusion using the BVH.
-
-    Parameters
-    ----------
-    face_centroids : np.ndarray
-        Centroid positions. Shape: (num_faces, 3).
-    face_normals : np.ndarray
-        Unit outward normals. Shape: (num_faces, 3).
-    sun_dir : np.ndarray
-        Unit vector pointing toward the sun. Shape: (3,).
-    bvh_nodes : np.ndarray
-        Flattened BVH node array.
-    tri_verts : np.ndarray
-        Triangle vertices. Shape: (num_triangles, 3, 3).
-    ordered_tri_indices : np.ndarray
-        Ordered triangle indices for BVH leaves.
-    epsilon : float
-        Intersection epsilon.
-
-    Returns
-    -------
-    illumination : np.ndarray
-        Illumination fraction per face: 1.0 = lit, 0.0 = shadowed.
-        Shape: (num_faces,).
-
+    Each face casts one ray from its centroid, nudged along the normal,
+    toward the Sun. Faces turned away from the Sun are dark without a ray.
     """
     num_faces = face_centroids.shape[0]
     illumination = np.zeros(num_faces, dtype=np.float64)
-
-    for i in prange(num_faces):
-        # Check if face is oriented toward the sun
-        cos_theta = (
-            face_normals[i, 0] * sun_dir[0]
-            + face_normals[i, 1] * sun_dir[1]
-            + face_normals[i, 2] * sun_dir[2]
-        )
-
-        if cos_theta <= 0.0:
-            # Face points away from sun — self-shadowed
-            illumination[i] = 0.0
-            continue
-
-        # Offset ray origin slightly along normal to avoid self-intersection
-        origin = np.empty(3, dtype=np.float64)
-        origin[0] = face_centroids[i, 0] + face_normals[i, 0] * epsilon * 100.0
-        origin[1] = face_centroids[i, 1] + face_normals[i, 1] * epsilon * 100.0
-        origin[2] = face_centroids[i, 2] + face_normals[i, 2] * epsilon * 100.0
-
-        # Cast shadow ray toward sun
-        occluded = _shadow_ray_bvh(
-            origin, sun_dir, bvh_nodes, tri_verts, ordered_tri_indices, epsilon
-        )
-
-        illumination[i] = 0.0 if occluded else 1.0
-
-    return illumination
-
-
-@njit(cache=True, parallel=True, fastmath=False)
-def compute_shadow_map_extended_source(
-    face_centroids: np.ndarray,
-    face_normals: np.ndarray,
-    sun_samples: np.ndarray,
-    bvh_nodes: np.ndarray,
-    tri_verts: np.ndarray,
-    ordered_tri_indices: np.ndarray,
-    epsilon: float,
-) -> np.ndarray:
-    """Compute illumination fraction for an extended (disk) sun.
-
-    For each mesh face, casts multiple shadow rays toward sample points
-    on the solar disk. The illumination fraction is the ratio of
-    unoccluded rays to total rays (penumbra support).
-
-    Parameters
-    ----------
-    face_centroids : np.ndarray
-        Centroid positions. Shape: (num_faces, 3).
-    face_normals : np.ndarray
-        Unit outward normals. Shape: (num_faces, 3).
-    sun_samples : np.ndarray
-        Unit direction vectors toward solar disk sample points.
-        Shape: (num_samples, 3).
-    bvh_nodes : np.ndarray
-        Flattened BVH node array.
-    tri_verts : np.ndarray
-        Triangle vertices. Shape: (num_triangles, 3, 3).
-    ordered_tri_indices : np.ndarray
-        Ordered triangle indices for BVH leaves.
-    epsilon : float
-        Intersection epsilon.
-
-    Returns
-    -------
-    illumination : np.ndarray
-        Illumination fraction per face, in [0, 1]. Shape: (num_faces,).
-
-    """
-    num_faces = face_centroids.shape[0]
-    num_samples = sun_samples.shape[0]
-    inv_samples = 1.0 / float(num_samples)
-
-    illumination = np.zeros(num_faces, dtype=np.float64)
-
-    for i in prange(num_faces):
-        visible_count = 0
-
-        for s in range(num_samples):
-            # The Moon occults samples below the global terrain horizon.
-            if sun_samples[s, 2] <= 0.0:
+    dx, dy, dz = sun_dir[0], sun_dir[1], sun_dir[2]
+    offset = epsilon * 100.0
+    num_chunks = (num_faces + _CHUNK - 1) // _CHUNK
+    for chunk in prange(num_chunks):
+        stack = np.empty(_STACK_SIZE, dtype=np.int64)
+        for i in range(chunk * _CHUNK, min(num_faces, (chunk + 1) * _CHUNK)):
+            nx, ny, nz = face_normals[i, 0], face_normals[i, 1], face_normals[i, 2]
+            if nx * dx + ny * dy + nz * dz <= 0.0:
                 continue
-
-            # Check if face is oriented toward this sun sample
-            cos_theta = (
-                face_normals[i, 0] * sun_samples[s, 0]
-                + face_normals[i, 1] * sun_samples[s, 1]
-                + face_normals[i, 2] * sun_samples[s, 2]
+            hit = _occluded(
+                face_centroids[i, 0] + nx * offset,
+                face_centroids[i, 1] + ny * offset,
+                face_centroids[i, 2] + nz * offset,
+                dx, dy, dz,
+                bvh_nodes, tri_verts, ordered_tri_indices, epsilon, stack,
             )
-
-            if cos_theta <= 0.0:
-                continue
-
-            # Offset ray origin
-            origin = np.empty(3, dtype=np.float64)
-            origin[0] = face_centroids[i, 0] + face_normals[i, 0] * epsilon * 100.0
-            origin[1] = face_centroids[i, 1] + face_normals[i, 1] * epsilon * 100.0
-            origin[2] = face_centroids[i, 2] + face_normals[i, 2] * epsilon * 100.0
-
-            sun_dir = sun_samples[s]
-            occluded = _shadow_ray_bvh(
-                origin, sun_dir, bvh_nodes, tri_verts, ordered_tri_indices, epsilon
-            )
-
-            if not occluded:
-                visible_count += 1
-
-        illumination[i] = float(visible_count) * inv_samples
-
+            if not hit:
+                illumination[i] = 1.0
     return illumination
 
 
@@ -590,53 +484,246 @@ def compute_extended_source_flux_factors(
     ordered_tri_indices: np.ndarray,
     epsilon: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return visible-disk fraction and disk-integrated projected cosine.
+    """Visible fraction of the solar disk and disk-integrated cosine per face.
 
-    The projected factor is ``mean(max(0, n·s) * visibility(s))`` over
-    equal-solid-angle solar samples.  This is the quantity that multiplies
-    irradiance; using the centre-ray cosine times visible fraction is biased
-    near the horizon and on steep facets.
+    The projected factor is ``mean(max(0, n·s) · visible(s))`` over
+    equal-solid-angle samples of the disk. That is the quantity that
+    multiplies irradiance; centre cosine × visible fraction is biased near
+    the horizon and on steep facets.
     """
     num_faces = face_centroids.shape[0]
     num_samples = sun_samples.shape[0]
     inv_samples = 1.0 / float(num_samples)
     illumination = np.zeros(num_faces, dtype=np.float64)
     projected_factor = np.zeros(num_faces, dtype=np.float64)
-
-    for i in prange(num_faces):
-        visible_count = 0
-        projected_sum = 0.0
-        origin = np.empty(3, dtype=np.float64)
-        origin[0] = face_centroids[i, 0] + face_normals[i, 0] * epsilon * 100.0
-        origin[1] = face_centroids[i, 1] + face_normals[i, 1] * epsilon * 100.0
-        origin[2] = face_centroids[i, 2] + face_normals[i, 2] * epsilon * 100.0
-
-        for s in range(num_samples):
-            if sun_samples[s, 2] <= 0.0:
-                continue
-            cos_theta = (
-                face_normals[i, 0] * sun_samples[s, 0]
-                + face_normals[i, 1] * sun_samples[s, 1]
-                + face_normals[i, 2] * sun_samples[s, 2]
-            )
-            if cos_theta <= 0.0:
-                continue
-            sun_dir = sun_samples[s]
-            if not _shadow_ray_bvh(
-                origin, sun_dir, bvh_nodes, tri_verts, ordered_tri_indices, epsilon
-            ):
-                visible_count += 1
-                projected_sum += cos_theta
-
-        illumination[i] = float(visible_count) * inv_samples
-        projected_factor[i] = projected_sum * inv_samples
-
+    offset = epsilon * 100.0
+    num_chunks = (num_faces + _CHUNK - 1) // _CHUNK
+    for chunk in prange(num_chunks):
+        stack = np.empty(_STACK_SIZE, dtype=np.int64)
+        for i in range(chunk * _CHUNK, min(num_faces, (chunk + 1) * _CHUNK)):
+            nx, ny, nz = face_normals[i, 0], face_normals[i, 1], face_normals[i, 2]
+            ox = face_centroids[i, 0] + nx * offset
+            oy = face_centroids[i, 1] + ny * offset
+            oz = face_centroids[i, 2] + nz * offset
+            visible = 0
+            projected = 0.0
+            for s in range(num_samples):
+                sx, sy, sz = sun_samples[s, 0], sun_samples[s, 1], sun_samples[s, 2]
+                if sz <= 0.0:
+                    continue
+                cos_theta = nx * sx + ny * sy + nz * sz
+                if cos_theta <= 0.0:
+                    continue
+                if not _occluded(ox, oy, oz, sx, sy, sz, bvh_nodes, tri_verts,
+                                 ordered_tri_indices, epsilon, stack):
+                    visible += 1
+                    projected += cos_theta
+            illumination[i] = visible * inv_samples
+            projected_factor[i] = projected * inv_samples
     return illumination, projected_factor
 
 
 # ===================================================================
-# BVH CONSTRUCTION — Python (one-time cost, not JIT-compiled)
+# BVH CONSTRUCTION — binned SAH, iterative (Numba JIT)
 # ===================================================================
+
+
+@njit(cache=True)
+def _build_bvh_kernel(
+    bmin: np.ndarray,
+    bmax: np.ndarray,
+    centroids: np.ndarray,
+    max_leaf: int,
+    num_bins: int,
+) -> tuple[np.ndarray, np.ndarray, int, int]:
+    """Build the flat node array. Returns (nodes, order, node_count, depth)."""
+    n = centroids.shape[0]
+    order = np.arange(n).astype(np.int64)
+    nodes = np.zeros(max(2 * n, 1) * _NODE_SIZE, dtype=np.float64)
+
+    # Work stack of (node index, start, end, depth).
+    work = np.empty((_MAX_DEPTH * 2 + 4, 4), dtype=np.int64)
+    work[0, 0] = 0
+    work[0, 1] = 0
+    work[0, 2] = n
+    work[0, 3] = 0
+    wp = 1
+    node_count = 1
+    max_depth = 0
+
+    bin_count = np.zeros(num_bins, dtype=np.int64)
+    bin_min = np.empty((num_bins, 3))
+    bin_max = np.empty((num_bins, 3))
+    right_area = np.empty(num_bins)
+    right_count = np.empty(num_bins, dtype=np.int64)
+
+    while wp > 0:
+        wp -= 1
+        node = work[wp, 0]
+        start = work[wp, 1]
+        end = work[wp, 2]
+        depth = work[wp, 3]
+        max_depth = max(max_depth, depth)
+        base = node * _NODE_SIZE
+        count = end - start
+
+        lo0 = lo1 = lo2 = _INF
+        hi0 = hi1 = hi2 = -_INF
+        c_lo0 = c_lo1 = c_lo2 = _INF
+        c_hi0 = c_hi1 = c_hi2 = -_INF
+        for k in range(start, end):
+            t = order[k]
+            lo0 = min(lo0, bmin[t, 0])
+            lo1 = min(lo1, bmin[t, 1])
+            lo2 = min(lo2, bmin[t, 2])
+            hi0 = max(hi0, bmax[t, 0])
+            hi1 = max(hi1, bmax[t, 1])
+            hi2 = max(hi2, bmax[t, 2])
+            c_lo0 = min(c_lo0, centroids[t, 0])
+            c_lo1 = min(c_lo1, centroids[t, 1])
+            c_lo2 = min(c_lo2, centroids[t, 2])
+            c_hi0 = max(c_hi0, centroids[t, 0])
+            c_hi1 = max(c_hi1, centroids[t, 1])
+            c_hi2 = max(c_hi2, centroids[t, 2])
+        nodes[base + _BBOX_MIN_X] = lo0
+        nodes[base + _BBOX_MIN_Y] = lo1
+        nodes[base + _BBOX_MIN_Z] = lo2
+        nodes[base + _BBOX_MAX_X] = hi0
+        nodes[base + _BBOX_MAX_Y] = hi1
+        nodes[base + _BBOX_MAX_Z] = hi2
+
+        make_leaf = count <= max_leaf or depth >= _MAX_DEPTH - 1
+        split_axis = -1
+        split_pos = 0.0
+        if not make_leaf:
+            ex0 = c_hi0 - c_lo0
+            ex1 = c_hi1 - c_lo1
+            ex2 = c_hi2 - c_lo2
+            if depth < _SAH_DEPTH_LIMIT:
+                d0, d1, d2 = hi0 - lo0, hi1 - lo1, hi2 - lo2
+                parent_area = 2.0 * (d0 * d1 + d1 * d2 + d2 * d0)
+                best_cost = float(count)
+                if parent_area > 1e-30:
+                    for axis in range(3):
+                        c_lo = c_lo0 if axis == 0 else (c_lo1 if axis == 1 else c_lo2)
+                        extent = ex0 if axis == 0 else (ex1 if axis == 1 else ex2)
+                        if extent < 1e-10:
+                            continue
+                        scale = num_bins / extent
+                        bin_count[:] = 0
+                        bin_min[:, :] = _INF
+                        bin_max[:, :] = -_INF
+                        for k in range(start, end):
+                            t = order[k]
+                            b = int((centroids[t, axis] - c_lo) * scale)
+                            if b >= num_bins:
+                                b = num_bins - 1
+                            bin_count[b] += 1
+                            for a in range(3):
+                                bin_min[b, a] = min(bin_min[b, a], bmin[t, a])
+                                bin_max[b, a] = max(bin_max[b, a], bmax[t, a])
+                        # Sweep right-to-left, then left-to-right.
+                        r0 = r1 = r2 = _INF
+                        s0 = s1 = s2 = -_INF
+                        acc = 0
+                        for b in range(num_bins - 1, 0, -1):
+                            if bin_count[b] > 0:
+                                r0 = min(r0, bin_min[b, 0])
+                                r1 = min(r1, bin_min[b, 1])
+                                r2 = min(r2, bin_min[b, 2])
+                                s0 = max(s0, bin_max[b, 0])
+                                s1 = max(s1, bin_max[b, 1])
+                                s2 = max(s2, bin_max[b, 2])
+                            acc += bin_count[b]
+                            right_count[b] = acc
+                            if acc > 0:
+                                q0, q1, q2 = s0 - r0, s1 - r1, s2 - r2
+                                right_area[b] = 2.0 * (q0 * q1 + q1 * q2 + q2 * q0)
+                            else:
+                                right_area[b] = 0.0
+                        l0 = l1 = l2 = _INF
+                        m0 = m1 = m2 = -_INF
+                        left = 0
+                        for b in range(0, num_bins - 1):
+                            if bin_count[b] > 0:
+                                l0 = min(l0, bin_min[b, 0])
+                                l1 = min(l1, bin_min[b, 1])
+                                l2 = min(l2, bin_min[b, 2])
+                                m0 = max(m0, bin_max[b, 0])
+                                m1 = max(m1, bin_max[b, 1])
+                                m2 = max(m2, bin_max[b, 2])
+                            left += bin_count[b]
+                            right = right_count[b + 1]
+                            if left == 0 or right == 0:
+                                continue
+                            q0, q1, q2 = m0 - l0, m1 - l1, m2 - l2
+                            left_area = 2.0 * (q0 * q1 + q1 * q2 + q2 * q0)
+                            cost = 1.0 + (
+                                left_area * left + right_area[b + 1] * right
+                            ) / parent_area
+                            if cost < best_cost:
+                                best_cost = cost
+                                split_axis = axis
+                                split_pos = c_lo + (b + 1) / scale
+                if split_axis < 0 and count > 4 * max_leaf:
+                    # SAH found nothing cheaper than a leaf, but the leaf
+                    # would be large: split at the median instead.
+                    split_axis = -2
+            else:
+                split_axis = -2
+            if split_axis == -1:
+                make_leaf = True
+
+        if make_leaf:
+            nodes[base + _CHILD_OR_START] = float(start)
+            nodes[base + _COUNT_OR_RIGHT] = float(-count)
+            continue
+
+        mid = start
+        if split_axis >= 0:
+            i = start
+            j = end - 1
+            while i <= j:
+                if centroids[order[i], split_axis] < split_pos:
+                    i += 1
+                else:
+                    tmp = order[i]
+                    order[i] = order[j]
+                    order[j] = tmp
+                    j -= 1
+            mid = i
+        if mid == start or mid == end:
+            # Median split along the widest centroid extent.
+            ex0 = c_hi0 - c_lo0
+            ex1 = c_hi1 - c_lo1
+            ex2 = c_hi2 - c_lo2
+            axis = 0 if (ex0 >= ex1 and ex0 >= ex2) else (1 if ex1 >= ex2 else 2)
+            keys = np.empty(count)
+            for k in range(count):
+                keys[k] = centroids[order[start + k], axis]
+            perm = np.argsort(keys, kind="mergesort")
+            segment = order[start:end].copy()
+            for k in range(count):
+                order[start + k] = segment[perm[k]]
+            mid = start + count // 2
+
+        left_node = node_count
+        right_node = node_count + 1
+        node_count += 2
+        nodes[base + _CHILD_OR_START] = float(left_node)
+        nodes[base + _COUNT_OR_RIGHT] = float(right_node)
+        # Push right first so the left subtree is built first (better locality).
+        work[wp, 0] = right_node
+        work[wp, 1] = mid
+        work[wp, 2] = end
+        work[wp, 3] = depth + 1
+        work[wp + 1, 0] = left_node
+        work[wp + 1, 1] = start
+        work[wp + 1, 2] = mid
+        work[wp + 1, 3] = depth + 1
+        wp += 2
+
+    return nodes[: node_count * _NODE_SIZE].copy(), order, node_count, max_depth
 
 
 def build_bvh(
@@ -644,380 +731,27 @@ def build_bvh(
     max_leaf_triangles: int = 4,
     sah_num_bins: int = 16,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build a flattened BVH from a triangle mesh using binned SAH.
-
-    Parameters
-    ----------
-    mesh : TriangleMesh
-        Triangle mesh with vertices, triangle indices, and centroids.
-    max_leaf_triangles : int
-        Maximum number of triangles per leaf node. Default: 4.
-    sah_num_bins : int
-        Number of bins for SAH cost evaluation. Default: 16.
+    """Build a flattened BVH over the mesh with binned SAH.
 
     Returns
     -------
     bvh_nodes : np.ndarray
-        Flattened node array. Shape: (num_nodes * 8,), dtype: float64.
+        Flat node array, 8 float64 per node (see module docstring).
     tri_verts : np.ndarray
-        Triangle vertex positions reordered for BVH locality.
-        Shape: (num_triangles, 3, 3), dtype: float64.
+        Triangle vertices indexed by original triangle id. Shape (N, 3, 3).
     ordered_indices : np.ndarray
-        Triangle indices in BVH leaf order. Shape: (num_triangles,), dtype: int64.
+        Triangle ids in leaf order; leaves reference ranges of this array.
 
     """
-    num_triangles = mesh.triangles.shape[0]
+    tri_verts = np.ascontiguousarray(mesh.vertices[mesh.triangles], dtype=np.float64)
+    bmin = tri_verts.min(axis=1)
+    bmax = tri_verts.max(axis=1)
+    centroids = tri_verts.mean(axis=1)
+    nodes, order, node_count, depth = _build_bvh_kernel(
+        bmin, bmax, centroids, int(max_leaf_triangles), int(sah_num_bins)
+    )
     logger.info(
-        "Building BVH for %d triangles (max_leaf=%d, sah_bins=%d)...",
-        num_triangles,
-        max_leaf_triangles,
-        sah_num_bins,
+        "BVH: %d triangles, %d nodes, depth %d, %.1f MB",
+        tri_verts.shape[0], node_count, depth, (nodes.nbytes + tri_verts.nbytes) / 1e6,
     )
-
-    # Pre-extract all triangle vertex positions: (N, 3, 3)
-    tri_verts = np.empty((num_triangles, 3, 3), dtype=np.float64)
-    for k in range(3):
-        tri_verts[:, k, :] = mesh.vertices[mesh.triangles[:, k]]
-
-    # Compute per-triangle AABBs and centroids
-    tri_bboxes_min = np.minimum(
-        np.minimum(tri_verts[:, 0, :], tri_verts[:, 1, :]), tri_verts[:, 2, :]
-    )
-    tri_bboxes_max = np.maximum(
-        np.maximum(tri_verts[:, 0, :], tri_verts[:, 1, :]), tri_verts[:, 2, :]
-    )
-    tri_centroids = (tri_verts[:, 0, :] + tri_verts[:, 1, :] + tri_verts[:, 2, :]) / 3.0
-
-    # Working index array (reordered during construction)
-    indices = np.arange(num_triangles, dtype=np.int64)
-
-    # Pre-allocate node storage (worst case: 2*N - 1 nodes for N triangles)
-    max_nodes = 2 * num_triangles
-    nodes_flat = np.zeros(max_nodes * _NODE_SIZE, dtype=np.float64)
-
-    node_count = [0]  # Mutable counter (list for closure access)
-
-    def _allocate_node() -> int:
-        idx = node_count[0]
-        node_count[0] += 1
-        return idx
-
-    def _build_recursive(start: int, end: int) -> int:
-        """Recursively build BVH. Returns node index."""
-        node_idx = _allocate_node()
-        base = node_idx * _NODE_SIZE
-        count = end - start
-
-        # Compute AABB for this subset
-        bbox_min = tri_bboxes_min[indices[start:end]].min(axis=0)
-        bbox_max = tri_bboxes_max[indices[start:end]].max(axis=0)
-
-        nodes_flat[base + _BBOX_MIN_X] = bbox_min[0]
-        nodes_flat[base + _BBOX_MIN_Y] = bbox_min[1]
-        nodes_flat[base + _BBOX_MIN_Z] = bbox_min[2]
-        nodes_flat[base + _BBOX_MAX_X] = bbox_max[0]
-        nodes_flat[base + _BBOX_MAX_Y] = bbox_max[1]
-        nodes_flat[base + _BBOX_MAX_Z] = bbox_max[2]
-
-        if count <= max_leaf_triangles:
-            # Leaf node
-            nodes_flat[base + _CHILD_OR_START] = float(start)
-            nodes_flat[base + _COUNT_OR_RIGHT] = float(-count)
-            return node_idx
-
-        # Find best split using binned SAH
-        best_axis, best_split = _find_best_split_sah(
-            indices, start, end, tri_centroids, tri_bboxes_min, tri_bboxes_max,
-            bbox_min, bbox_max, sah_num_bins,
-        )
-
-        if best_axis < 0:
-            # No beneficial split found — make leaf
-            nodes_flat[base + _CHILD_OR_START] = float(start)
-            nodes_flat[base + _COUNT_OR_RIGHT] = float(-count)
-            return node_idx
-
-        # Partition indices around split plane
-        mid = _partition_indices(
-            indices, start, end, best_axis, best_split, tri_centroids
-        )
-
-        # Fallback: if partition didn't split, use median
-        if mid == start or mid == end:
-            mid = (start + end) // 2
-            # Sort by centroid along best_axis
-            sub_indices = indices[start:end].copy()
-            order = np.argsort(tri_centroids[sub_indices, best_axis])
-            indices[start:end] = sub_indices[order]
-            mid = (start + end) // 2
-
-        # Recurse
-        left_idx = _build_recursive(start, mid)
-        right_idx = _build_recursive(mid, end)
-
-        nodes_flat[base + _CHILD_OR_START] = float(left_idx)
-        nodes_flat[base + _COUNT_OR_RIGHT] = float(right_idx)
-
-        return node_idx
-
-    _build_recursive(0, num_triangles)
-
-    actual_nodes = node_count[0]
-    bvh_nodes = nodes_flat[: actual_nodes * _NODE_SIZE].copy()
-
-    logger.info(
-        "BVH built: %d nodes (%d internal, %d est. leaves), "
-        "%.1f MB node memory",
-        actual_nodes,
-        actual_nodes,  # includes both
-        actual_nodes - (actual_nodes // 2),
-        bvh_nodes.nbytes / 1e6,
-    )
-
-    return bvh_nodes, tri_verts, indices.copy()
-
-
-def _find_best_split_sah(
-    indices: np.ndarray,
-    start: int,
-    end: int,
-    centroids: np.ndarray,
-    bboxes_min: np.ndarray,
-    bboxes_max: np.ndarray,
-    parent_bbox_min: np.ndarray,
-    parent_bbox_max: np.ndarray,
-    num_bins: int,
-) -> tuple[int, float]:
-    """Find the best split axis and position using binned SAH.
-
-    Parameters
-    ----------
-    indices : np.ndarray
-        Working index array.
-    start, end : int
-        Range of indices to consider.
-    centroids : np.ndarray
-        Triangle centroids. Shape: (N, 3).
-    bboxes_min, bboxes_max : np.ndarray
-        Per-triangle AABBs. Shape: (N, 3).
-    parent_bbox_min, parent_bbox_max : np.ndarray
-        Parent node AABB. Shape: (3,).
-    num_bins : int
-        Number of bins for SAH sweep.
-
-    Returns
-    -------
-    best_axis : int
-        Best split axis (0, 1, 2) or -1 if no beneficial split.
-    best_split : float
-        Best split position along the axis.
-
-    """
-    count = end - start
-    sub_idx = indices[start:end]
-
-    # SAH costs: C_trav + (SA_L/SA_P)*N_L*C_isect + (SA_R/SA_P)*N_R*C_isect
-    # We minimize: SA_L*N_L + SA_R*N_R (ignoring constants)
-    c_trav = 1.0
-    c_isect = 1.0
-    parent_sa = _surface_area(parent_bbox_min, parent_bbox_max)
-    if parent_sa < 1e-30:
-        return -1, 0.0
-
-    leaf_cost = count * c_isect
-    best_cost = leaf_cost
-    best_axis = -1
-    best_split = 0.0
-
-    for axis in range(3):
-        axis_min = parent_bbox_min[axis]
-        axis_max = parent_bbox_max[axis]
-        axis_range = axis_max - axis_min
-
-        if axis_range < 1e-10:
-            continue
-
-        # Bin centroids
-        bin_width = axis_range / num_bins
-        bin_counts = np.zeros(num_bins, dtype=np.int64)
-        bin_bbox_min = np.full((num_bins, 3), _INF, dtype=np.float64)
-        bin_bbox_max = np.full((num_bins, 3), -_INF, dtype=np.float64)
-
-        for idx in sub_idx:
-            b = int((centroids[idx, axis] - axis_min) / bin_width)
-            b = min(b, num_bins - 1)
-            bin_counts[b] += 1
-            for d in range(3):
-                if bboxes_min[idx, d] < bin_bbox_min[b, d]:
-                    bin_bbox_min[b, d] = bboxes_min[idx, d]
-                if bboxes_max[idx, d] > bin_bbox_max[b, d]:
-                    bin_bbox_max[b, d] = bboxes_max[idx, d]
-
-        # Sweep from left to right to evaluate split costs
-        for split_bin in range(1, num_bins):
-            left_count = int(bin_counts[:split_bin].sum())
-            right_count = count - left_count
-
-            if left_count == 0 or right_count == 0:
-                continue
-
-            # Compute left and right AABBs
-            left_bins_valid = bin_counts[:split_bin] > 0
-            right_bins_valid = bin_counts[split_bin:] > 0
-
-            if not left_bins_valid.any() or not right_bins_valid.any():
-                continue
-
-            left_min = bin_bbox_min[:split_bin][left_bins_valid].min(axis=0)
-            left_max = bin_bbox_max[:split_bin][left_bins_valid].max(axis=0)
-            right_min = bin_bbox_min[split_bin:][right_bins_valid].min(axis=0)
-            right_max = bin_bbox_max[split_bin:][right_bins_valid].max(axis=0)
-
-            sa_left = _surface_area(left_min, left_max)
-            sa_right = _surface_area(right_min, right_max)
-
-            cost = c_trav + (sa_left * left_count + sa_right * right_count) * c_isect / parent_sa
-
-            if cost < best_cost:
-                best_cost = cost
-                best_axis = axis
-                best_split = axis_min + split_bin * bin_width
-
-    return best_axis, best_split
-
-
-def _surface_area(bbox_min: np.ndarray, bbox_max: np.ndarray) -> float:
-    """Compute the surface area of an AABB.
-
-    Parameters
-    ----------
-    bbox_min, bbox_max : np.ndarray
-        AABB corners. Shape: (3,).
-
-    Returns
-    -------
-    float
-        Surface area.
-
-    """
-    d = bbox_max - bbox_min
-    return 2.0 * (d[0] * d[1] + d[1] * d[2] + d[2] * d[0])
-
-
-def _partition_indices(
-    indices: np.ndarray,
-    start: int,
-    end: int,
-    axis: int,
-    split: float,
-    centroids: np.ndarray,
-) -> int:
-    """Partition indices in-place around a split plane.
-
-    Indices with centroid[axis] < split go to the left partition.
-
-    Parameters
-    ----------
-    indices : np.ndarray
-        Working index array (modified in-place).
-    start, end : int
-        Range to partition.
-    axis : int
-        Split axis.
-    split : float
-        Split position.
-    centroids : np.ndarray
-        Triangle centroids.
-
-    Returns
-    -------
-    int
-        Partition point (first index of right partition).
-
-    """
-    left = start
-    right = end - 1
-
-    while left <= right:
-        if centroids[indices[left], axis] < split:
-            left += 1
-        else:
-            indices[left], indices[right] = indices[right], indices[left]
-            right -= 1
-
-    return left
-
-
-# ===================================================================
-# HIGH-LEVEL API
-# ===================================================================
-
-
-def compute_illumination(
-    mesh: TriangleMesh,
-    sun_dir: np.ndarray,
-    bvh_data: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
-    sun_samples: np.ndarray | None = None,
-    epsilon: float = _DEFAULT_EPSILON,
-    max_leaf_triangles: int = _DEFAULT_MAX_LEAF,
-) -> np.ndarray:
-    """Compute the illumination fraction for every mesh face.
-
-    Parameters
-    ----------
-    mesh : TriangleMesh
-        The terrain mesh.
-    sun_dir : np.ndarray
-        Unit vector pointing toward the sun center. Shape: (3,).
-    bvh_data : tuple, optional
-        Pre-built BVH (bvh_nodes, tri_verts, ordered_indices). If None,
-        the BVH is built on the fly.
-    sun_samples : np.ndarray, optional
-        Solar disk sample directions. Shape: (N, 3). If None, point-source
-        mode is used.
-    epsilon : float
-        Intersection epsilon.
-    max_leaf_triangles : int
-        BVH leaf capacity.
-
-    Returns
-    -------
-    illumination : np.ndarray
-        Per-face illumination fraction [0, 1]. Shape: (num_faces,).
-
-    """
-    # Build BVH if not provided
-    if bvh_data is None:
-        bvh_nodes, tri_verts, ordered_indices = build_bvh(
-            mesh, max_leaf_triangles=max_leaf_triangles
-        )
-    else:
-        bvh_nodes, tri_verts, ordered_indices = bvh_data
-
-    if sun_samples is None:
-        # Point-source mode
-        logger.info("Computing illumination (point-source mode)...")
-        return compute_shadow_map_point_source(
-            mesh.face_centroids,
-            mesh.face_normals,
-            sun_dir,
-            bvh_nodes,
-            tri_verts,
-            ordered_indices,
-            epsilon,
-        )
-    else:
-        # Extended-source mode
-        logger.info(
-            "Computing illumination (extended source, %d samples)...",
-            sun_samples.shape[0],
-        )
-        return compute_shadow_map_extended_source(
-            mesh.face_centroids,
-            mesh.face_normals,
-            sun_samples,
-            bvh_nodes,
-            tri_verts,
-            ordered_indices,
-            epsilon,
-        )
+    return nodes, tri_verts, order

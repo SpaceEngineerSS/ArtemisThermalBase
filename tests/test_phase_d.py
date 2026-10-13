@@ -108,17 +108,17 @@ class TestPolarStereographic:
         result = get_shackleton_center()
         r = np.sqrt(result["x_m"] ** 2 + result["y_m"] ** 2)
 
-        # Shackleton is ~0.46° from the pole ≈ ~14 km
+        # Shackleton is ~0.33° from the pole ≈ ~10 km
         assert r < 15_000.0, f"Shackleton at {r:.0f} m from pole, expected < 15 km"
         assert r > 5_000.0, f"Shackleton at {r:.0f} m from pole, expected > 5 km"
-        assert result["lat_deg"] == -89.54
+        assert result["lat_deg"] == -89.67
         assert result["lon_deg"] == 129.78
 
     def test_antipodal_longitude_symmetry(self) -> None:
         """Points at opposite longitudes should be reflected through the pole.
 
-        For lon=0: x = ρ·sin(0) = 0, y = -ρ·cos(0) = -ρ
-        For lon=180: x = ρ·sin(π) = 0, y = -ρ·cos(π) = +ρ
+        For lon=0: x = ρ·sin(0) = 0, y = ρ·cos(0) = +ρ
+        For lon=180: x = ρ·sin(π) = 0, y = ρ·cos(π) = -ρ
         → y flips sign, x stays ~0.
         """
         lat = -89.0
@@ -368,13 +368,6 @@ class TestIlluminationEngine:
         # Point source should have zero penumbra
         assert result_point.stats["penumbra_fraction"] == 0.0, (
             "Point source should have no penumbra"
-        )
-
-        # Extended source should have SOME penumbra faces
-        # (the solar disk angular size is small, so even with a bowl
-        # there may be very few penumbra faces. Check for >= 0 is safe.)
-        assert result_ext.stats["penumbra_fraction"] >= 0.0, (
-            "Extended source penumbra fraction should be non-negative"
         )
 
         # Both modes should have similar mean illumination (within ~5%)

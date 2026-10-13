@@ -13,16 +13,15 @@ from core_engine.illumination import IlluminationEngine
 from core_engine.mesh import dem_to_mesh
 from core_engine.view_factors import compute_view_factor_matrix
 from data_ingestion.synthetic_dem import generate_synthetic_dem
-from gui.data_loader import load_dashboard_data
 from simulation.cli import main as installed_main
-from simulation.io_manager import save_results
+from simulation.io_manager import ResultsBundle, ResultsError
 from simulation.runner import SimulationRunner
 from thermal_solver.crank_nicolson import CrankNicolsonSolver, create_thermal_column
 
 
 @pytest.fixture(scope="module")
 def config():
-    return load_config("config/default_config.yaml")
+    return load_config()
 
 
 def test_advanced_yaml_sections_are_loaded(config) -> None:
@@ -38,36 +37,51 @@ def test_installed_cli_entrypoint_exists() -> None:
     assert callable(installed_main)
 
 
-def test_dashboard_reads_canonical_simulation_files(tmp_path) -> None:
-    save_results(
-        tmp_path,
-        surface_temps=np.array([120.0, 130.0]),
-        illumination=np.array([0.0, 1.0]),
-        dem_elevation=np.array([[0.0, 1.0], [2.0, 3.0]]),
-        face_centroids=np.zeros((2, 3)),
-        face_areas=np.ones(2),
-        probe_temps={"floor": [120.0]},
-        sun_elevations=[0.1],
-        metadata={"num_faces": 2},
+def _tiny(config):
+    return replace(
+        config,
+        synthetic_dem=replace(
+            config.synthetic_dem,
+            crater_type="flat",
+            radius_m=10.0,
+            domain_padding_m=0.0,
+            grid_resolution_m=10.0,
+        ),
+        hapke=replace(config.hapke, enabled=False),
+        roughness=replace(config.roughness, enabled=False),
     )
-    dashboard_data = load_dashboard_data(tmp_path)
-    assert dashboard_data is not None
-    assert np.array_equal(dashboard_data["surface_temps"], [120.0, 130.0])
-    assert np.array_equal(dashboard_data["illumination"], [0.0, 1.0])
-    assert dashboard_data["metadata"]["num_faces"] == 2
+
+
+def test_run_folder_round_trip(config, tmp_path) -> None:
+    result = SimulationRunner(_tiny(config)).run(
+        start_time=datetime(2026, 1, 1, tzinfo=UTC),
+        duration_hours=2.0,
+        dt_s=600.0,
+        output_interval_s=1800.0,
+        point_source_mode=True,
+        output_dir=tmp_path,
+    )
+    bundle = ResultsBundle.open(tmp_path)
+    assert bundle.num_faces == result.metadata["num_faces"]
+    assert bundle.raster("surface_T_final").shape == bundle.grid_shape
+    assert np.allclose(bundle.array("surface_T_final"), result.final_surface_T, atol=1e-3)
+    assert bundle.snapshot_count == len(result.times) == 4
+    assert bundle.timeline["hours"][-1] == pytest.approx(2.0)
     checksums = (tmp_path / "checksums.sha256").read_text(encoding="ascii")
-    assert "thermal_grid.npy" in checksums
+    assert "surface_T_final.npy" in checksums
     assert "metadata.json" in checksums
 
 
+def test_incomplete_run_folder_is_reported(tmp_path) -> None:
+    (tmp_path / "metadata.json").write_text('{"format_version": 2}', encoding="utf-8")
+    with pytest.raises(ResultsError, match="incomplete"):
+        ResultsBundle.open(tmp_path)
+
+
 def test_batch_solver_matches_scalar_solver(config) -> None:
-    chunked_config = replace(
-        config,
-        solver=replace(config.solver, batch_size_faces=1),
-    )
-    solver = CrankNicolsonSolver(chunked_config)
-    first = create_thermal_column(chunked_config)
-    second = create_thermal_column(chunked_config)
+    solver = CrankNicolsonSolver(config)
+    first = create_thermal_column(config)
+    second = create_thermal_column(config)
     q_solar = np.array([0.0, 250.0], dtype=np.float64)
     q_ir = np.array([1.0, 2.0], dtype=np.float64)
     temperatures = np.vstack([first.T.copy(), second.T.copy()])
@@ -167,13 +181,13 @@ def test_extended_sun_remains_partial_below_center_horizon(config) -> None:
 
 
 def test_research_config_is_fail_closed_without_real_dem() -> None:
-    research_config = load_config("config/research_shackleton.yaml")
+    research_config = load_config("research_shackleton")
     assert research_config.research.enabled is True
     assert research_config.ephemeris.mode == "spice"
-    with pytest.raises(ValueError, match="real external DEM"):
+    with pytest.raises(ValueError, match="real DEM"):
         SimulationRunner(research_config).run(
             start_time=datetime(2025, 1, 1, tzinfo=UTC),
-            duration_hours=0.0,
+            duration_hours=1.0,
             save_data=False,
         )
 
@@ -227,40 +241,30 @@ def test_runner_uses_dense_state_pipeline(config) -> None:
     )
     assert result.metadata["num_steps"] == 1
     assert result.metadata["total_compute_steps"] == 1
-    assert len(result.surface_temps) == 1
+    assert len(result.times) == 1
     assert result.times[0] == datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC)
 
 
-def test_runner_skyfield_mode_uses_target_and_distance_flux(
-    config, monkeypatch
-) -> None:
-    calls: list[tuple[float, float, float]] = []
+def test_runner_rotates_ephemeris_sun_into_the_mesh_frame(config, monkeypatch) -> None:
+    from core_engine.frames import surface_normal
+    from data_ingestion.ephemeris import SunState
 
-    class FakeEphemeris:
+    calls: list[float] = []
+
+    class OverheadSun:
         def __init__(self, **_kwargs) -> None:
             pass
 
-        def get_sun_state(self, _time, lat_deg, lon_deg, S_0):
-            calls.append((lat_deg, lon_deg, S_0))
-            return {
-                "direction": np.array([0.0, 0.0, 1.0]),
-                "solar_flux": 1400.0,
-            }
+        def sun_state(self, _time, solar_constant):
+            calls.append(solar_constant)
+            return SunState(surface_normal(-88.0, 45.0), 1.5e11, 1400.0)
 
     import data_ingestion.ephemeris as ephemeris_module
 
-    monkeypatch.setattr(ephemeris_module, "SolarEphemeris", FakeEphemeris)
+    monkeypatch.setattr(ephemeris_module, "SolarEphemeris", OverheadSun)
     run_config = replace(
-        config,
-        synthetic_dem=replace(
-            config.synthetic_dem,
-            crater_type="flat",
-            radius_m=10.0,
-            domain_padding_m=0.0,
-            grid_resolution_m=10.0,
-        ),
-        hapke=replace(config.hapke, enabled=False),
-        roughness=replace(config.roughness, enabled=False),
+        _tiny(config),
+        solver=replace(config.solver, initial_condition="uniform"),
     )
     result = SimulationRunner(run_config).run(
         start_time=datetime(2026, 1, 1, tzinfo=UTC),
@@ -273,7 +277,8 @@ def test_runner_skyfield_mode_uses_target_and_distance_flux(
         longitude_deg=45.0,
         save_data=False,
     )
-
-    assert calls == [(-88.0, 45.0, config.constants.solar_constant)]
+    assert calls == [config.constants.solar_constant]
     assert result.metadata["ephemeris_mode"] == "skyfield"
-    assert np.all(result.illumination_maps[0] == 1.0)
+    assert result.metadata["frame"]["latitude_deg"] == pytest.approx(-88.0)
+    assert result.sun_elevations[0] == pytest.approx(90.0, abs=1e-6)
+    assert np.all(result.final_illumination == 1.0)

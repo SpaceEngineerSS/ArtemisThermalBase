@@ -13,15 +13,15 @@ Pipeline
 2. Generate N solar disk sample directions around the sun center.
 3. Dispatch to raytracer:
    - Point source: ``compute_shadow_map_point_source()``
-   - Extended source: ``compute_shadow_map_extended_source()``
+   - Extended source: ``compute_extended_source_flux_factors()``
 4. Return illumination fraction array [0, 1] per mesh face.
 
 Notes
 -----
 The extended-source mode fires N shadow rays per face, where N is the
-number of solar disk samples. For 39K faces × 64 samples = ~2.5M ray
-queries per timestep. The BVH acceleration keeps this tractable (~1-2
-minutes on modern CPUs with Numba parallel).
+number of solar disk samples: 36k faces × 16 samples is about 0.6M rays
+per time step, which the BVH traces in a few tens of milliseconds on a
+four-core laptop.
 
 """
 
@@ -106,6 +106,8 @@ class IlluminationEngine:
         Raytracer intersection epsilon.
     max_leaf_triangles : int
         BVH leaf capacity.
+    sah_num_bins : int
+        Bins per axis for the SAH split search.
 
     """
 
@@ -118,6 +120,7 @@ class IlluminationEngine:
         point_source_mode: bool = False,
         epsilon: float = 1e-10,
         max_leaf_triangles: int = 4,
+        sah_num_bins: int = 16,
     ) -> None:
         self._mesh = mesh
         self._solar_angular_radius_rad = solar_angular_radius_rad
@@ -131,7 +134,7 @@ class IlluminationEngine:
         else:
             logger.info("Building BVH for illumination engine...")
             self._bvh_nodes, self._tri_verts, self._ordered_indices = build_bvh(
-                mesh, max_leaf_triangles=max_leaf_triangles
+                mesh, max_leaf_triangles=max_leaf_triangles, sah_num_bins=sah_num_bins
             )
 
         logger.info(
@@ -200,7 +203,7 @@ class IlluminationEngine:
         )
         if sun_elevation_deg <= horizon_cutoff_deg:
             num_faces = self._mesh.face_centroids.shape[0]
-            logger.info(
+            logger.debug(
                 "Sun below horizon (elevation=%.2f°). All faces shadowed.",
                 sun_elevation_deg,
             )
@@ -234,7 +237,7 @@ class IlluminationEngine:
         # Compute statistics
         stats = self._compute_stats(illumination)
 
-        logger.info(
+        logger.debug(
             "Illumination computed: mode=%s, elevation=%.2f°, "
             "mean=%.3f, shadow=%.1f%%, penumbra=%.1f%%",
             mode_str,

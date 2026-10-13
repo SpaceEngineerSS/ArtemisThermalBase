@@ -30,6 +30,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from core_engine.frames import curvature_drop
 from data_ingestion.synthetic_dem import DEMData
 
 logger = logging.getLogger(__name__)
@@ -68,13 +69,18 @@ class TriangleMesh:
     metadata: dict
 
 
-def dem_to_mesh(dem: DEMData) -> TriangleMesh:
+def dem_to_mesh(dem: DEMData, curvature_radius_m: float | None = None) -> TriangleMesh:
     """Convert a DEM elevation grid to a triangle mesh.
 
     Parameters
     ----------
     dem : DEMData
         Digital Elevation Model with x/y coordinate arrays and 2D elevation grid.
+    curvature_radius_m : float, optional
+        Body radius. When given, every vertex is lowered by the height of the
+        sphere below the tangent plane at the DEM centre, so distant terrain
+        sinks toward the horizon as it does on the Moon. ``None`` keeps the
+        flat-plane geometry.
 
     Returns
     -------
@@ -98,8 +104,11 @@ def dem_to_mesh(dem: DEMData) -> TriangleMesh:
     # --- Build vertex array ---
     # Create 3D coordinates for every DEM pixel
     xx, yy = np.meshgrid(dem.x_coords, dem.y_coords, indexing="xy")
+    zz = elev
+    if curvature_radius_m is not None:
+        zz = elev - curvature_drop(xx, yy, curvature_radius_m)
     vertices = np.column_stack(
-        [xx.ravel(), yy.ravel(), elev.ravel()]
+        [xx.ravel(), yy.ravel(), zz.ravel()]
     ).astype(np.float64)
     num_vertices = vertices.shape[0]
 
@@ -153,6 +162,8 @@ def dem_to_mesh(dem: DEMData) -> TriangleMesh:
     metadata = {
         "source_dem_nx": nx,
         "source_dem_ny": ny,
+        "grid_shape": (ny, nx),
+        "curvature_radius_m": curvature_radius_m,
         "num_vertices": num_vertices,
         "num_triangles": num_triangles,
         "resolution_m": dem.resolution_m,
