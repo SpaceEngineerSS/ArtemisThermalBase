@@ -62,7 +62,9 @@ class RunCancelledError(RuntimeError):
 class SimulationResults:
     """Everything a run produces.
 
-    Per-face arrays have shape ``(num_faces,)``; time series have one entry
+    Per-face arrays have shape ``(num_faces,)``. ``sunlit_fraction`` is the
+    share of production steps in which at least half of the solar disk was
+    visible from the face. Time series have one entry
     per output step (``times``, ``sun_elevations``) or per time step
     (``probe_temps``).
     """
@@ -73,6 +75,7 @@ class SimulationResults:
     max_surface_T: np.ndarray
     mean_surface_T: np.ndarray
     mean_illumination: np.ndarray
+    sunlit_fraction: np.ndarray
     face_centroids: np.ndarray
     face_normals: np.ndarray
     face_areas: np.ndarray
@@ -417,6 +420,7 @@ class SimulationRunner:
         stats_max = np.full(num_faces, -np.inf)
         stats_sum = np.zeros(num_faces)
         illum_sum = np.zeros(num_faces)
+        sunlit_steps = np.zeros(num_faces, dtype=np.int32)
         stats_count = 0
 
         out_dir = Path(output_dir if output_dir is not None else cfg.output.directory)
@@ -487,6 +491,7 @@ class SimulationRunner:
                 np.maximum(stats_max, surface, out=stats_max)
                 stats_sum += surface
                 illum_sum += illumination
+                sunlit_steps += illumination >= 0.5
                 stats_count += 1
                 for probe in probes:
                     probe_temps[probe.name].append(float(surface[probe.face_index]))
@@ -568,6 +573,7 @@ class SimulationRunner:
             max_surface_T=stats_max,
             mean_surface_T=stats_sum / count,
             mean_illumination=illum_sum / count,
+            sunlit_fraction=sunlit_steps / count,
             face_centroids=mesh.face_centroids,
             face_normals=mesh.face_normals,
             face_areas=mesh.face_areas,

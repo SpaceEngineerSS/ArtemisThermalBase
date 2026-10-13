@@ -64,6 +64,13 @@ class DEMData:
     metadata: dict
 
 
+def synthetic_grid_shape(config: SyntheticDEMConfig) -> tuple[int, int]:
+    """(ny, nx) of the DEM :func:`generate_synthetic_dem` would build."""
+    half = config.radius_m + config.domain_padding_m
+    n = len(np.arange(-half, half + config.grid_resolution_m, config.grid_resolution_m))
+    return n, n
+
+
 def generate_synthetic_dem(config: SyntheticDEMConfig) -> DEMData:
     """Generate a synthetic crater DEM from configuration.
 

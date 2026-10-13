@@ -57,7 +57,6 @@ dev = [
     "artemis-thermal-base[dem,ephemeris,gui,docs]",
     "pytest>=8.0",
     "pytest-cov>=4.1",
-    "pytest-qt>=4.4",
     "mypy>=1.8",
     "ruff>=0.4",
 ]
@@ -105,7 +104,6 @@ markers = [
     "slow: long-running physics checks (deselect with -m 'not slow')",
     "gui: needs PySide6 and a Qt platform plugin",
 ]
-qt_api = "pyside6"
 
 [tool.coverage.run]
 source = ["artemis_thermal", "core_engine", "data_ingestion", "simulation",
@@ -127,6 +125,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D101", "D102", "S603", "S607"]
 "tools/**" = ["S310"]
+"gui/theme.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

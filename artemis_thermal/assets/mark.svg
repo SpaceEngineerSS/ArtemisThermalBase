@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-linecap="round">
+  <title>ArtemisThermalBase</title>
+  <path d="M4.2 12.6C4 7.9 7.6 4.3 12.3 4.2C17 4.1 20.1 7.4 19.9 12C19.7 16.6 16.3 19.9 11.8 19.8C7.4 19.7 4.4 17 4.2 12.6Z" stroke="#1D1F21" stroke-width="1.4"/>
+  <path d="M8.3 14.6C7.5 11.6 9.4 8.9 12.4 8.8C14.6 8.7 16 10 16.2 11.6" stroke="#1D1F21" stroke-width="1"/>
+  <path d="M14.9 6.9V9.7M13.5 8.3H16.3M0.8 16.9L3.4 16.4" stroke="#E8641B" stroke-width="1.2" stroke-linecap="butt"/>
+</svg>

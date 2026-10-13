@@ -8,6 +8,7 @@ can be opened from any language without this package. Layout (format 2):
 ``surface_T_min/max/mean.npy``  per-face statistics over the production run
 ``illumination_final.npy``      lit fraction of the solar disk, last step
 ``illumination_mean.npy``       time-averaged lit fraction
+``sunlit_fraction.npy``         share of steps with ≥ half the disk visible
 ``face_centroids.npy``          (N, 3) mesh-frame centroids [m]
 ``face_normals.npy``            (N, 3) unit normals
 ``face_areas.npy``              (N,) areas [m²]
@@ -55,6 +56,7 @@ _FACE_MAPS = {
     "surface_T_mean": "mean_surface_T",
     "illumination_final": "final_illumination",
     "illumination_mean": "mean_illumination",
+    "sunlit_fraction": "sunlit_fraction",
 }
 
 
@@ -165,7 +167,7 @@ class ResultsBundle:
     """
 
     path: Path
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
     REQUIRED = ("surface_T_final", "face_centroids", "dem_x", "dem_y")
 
