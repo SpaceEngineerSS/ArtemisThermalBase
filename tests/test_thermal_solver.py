@@ -133,30 +133,24 @@ class TestSteadyState:
     def test_isothermal_no_flux(
         self, config: SimulationConfig
     ) -> None:
-        """No solar input, no geothermal → should remain isothermal.
+        """No sunlight, no terrain IR, no geothermal heat: the column only cools.
 
-        With Q_solar=0, Q_ir=0, Q_geo=0, and initially uniform T,
-        the only loss is ε·σ·T⁴ radiation. The column should cool
-        toward equilibrium (very low T for no input).
-
-        We test that after one step, the temperature change is
-        physically reasonable (cooling, not heating).
+        The surface radiates and nothing comes in, so no node may warm and
+        the surface must cool.
         """
-        # Override geothermal to zero for this test
-        col = create_thermal_column(config)
-        T_init = col.T[0]
+        from dataclasses import replace
 
-        solver = CrankNicolsonSolver(config)
-
-        # Manually call with Q_solar=0, Q_ir=0
-        # But we also need Q_geo=0; for now test with config geo flux
+        cold = replace(config, regolith=replace(config.regolith, geothermal_flux=0.0))
+        col = create_thermal_column(cold)
+        T_init = col.T.copy()
+        solver = CrankNicolsonSolver(cold)
         solver.step(col, Q_solar=0.0, Q_ir=0.0)
 
-        # Surface should cool (radiating away ε·σ·T⁴ with no input)
-        assert col.T[0] < T_init, (
-            f"Surface should cool with no solar input. "
-            f"T_before={T_init:.2f}, T_after={col.T[0]:.2f}"
+        assert col.T[0] < T_init[0], (
+            f"Surface should cool with no input. "
+            f"T_before={T_init[0]:.2f}, T_after={col.T[0]:.2f}"
         )
+        assert np.all(col.T <= T_init + 1e-9), "a node warmed without any heat source"
 
         # All temperatures should remain positive
         assert np.all(col.T > 0), "Temperatures must remain positive"
@@ -393,8 +387,7 @@ class TestThermalWave:
         amplitude = (T_max - T_min) / 2.0
         surface_amplitude = amplitude[0]
 
-        if surface_amplitude < 1.0:
-            pytest.skip("Surface amplitude too small for meaningful test")
+        assert surface_amplitude >= 1.0, "forcing too weak: the test would check nothing"
 
         # Check that amplitude decays with depth (qualitative for now,
         # since our forced boundary isn't perfectly sinusoidal)

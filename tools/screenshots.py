@@ -1,6 +1,9 @@
 """Capture the desktop app's pages as PNG files (used for the docs).
 
-    python tools/screenshots.py output/demo docs/img/app
+    python tools/screenshots.py output/demo docs/img/app [output/other_run]
+
+With a second run folder, the Compare page shows the second run minus the
+first.
 
 Runs Qt offscreen, so it works on a headless machine or in CI.
 """
@@ -19,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def main() -> int:
     run_folder = sys.argv[1] if len(sys.argv) > 1 else "output/demo"
     out = Path(sys.argv[2] if len(sys.argv) > 2 else "docs/img/app")
+    other = sys.argv[3] if len(sys.argv) > 3 else None
     out.mkdir(parents=True, exist_ok=True)
 
     from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
@@ -51,6 +55,10 @@ def main() -> int:
             left, right, bottom, top = bundle.extent
             window.results_page._pick(0.35 * left + 0.65 * right, 0.7 * bottom + 0.3 * top)
             settle(1200)
+        if other:
+            window.compare_page.set_run("a", run_folder)
+            window.compare_page.set_run("b", other)
+            settle(2500)
         suffix = "dark" if dark else "light"
         for key in ("results", "run", "reference", "compare"):
             window.go(key, animate=False)

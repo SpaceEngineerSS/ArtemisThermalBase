@@ -338,8 +338,7 @@ class TestBVHShadowMap:
         y_tol = small_bowl_dem.resolution_m * 1.5
         centerline_mask = np.abs(mesh.face_centroids[:, 1]) < y_tol
 
-        if not np.any(centerline_mask):
-            pytest.skip("No faces along centerline")
+        assert np.any(centerline_mask), "fixture mesh has no faces along the centreline"
 
         cx = mesh.face_centroids[centerline_mask, 0]
         cy = mesh.face_centroids[centerline_mask, 1]
@@ -408,8 +407,7 @@ class TestBVHShadowMap:
             mesh.face_centroids[:, 0] ** 2 + mesh.face_centroids[:, 1] ** 2
         ) < 50.0**2
 
-        if not np.any(center_mask):
-            pytest.skip("No faces near center")
+        assert np.any(center_mask), "fixture mesh has no faces near the centre"
 
         center_illum = illum[center_mask]
 
