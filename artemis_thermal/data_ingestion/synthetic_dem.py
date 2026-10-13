@@ -190,8 +190,8 @@ def _generate_parabolic_bowl(
         (ny * res) / 1000.0,
         D,
         H,
-        elevation.min(),
-        elevation.max(),
+        np.min(elevation),
+        np.max(elevation),
     )
 
     metadata = {
@@ -205,8 +205,8 @@ def _generate_parabolic_bowl(
         "num_pixels_x": nx,
         "num_pixels_y": ny,
         "seed": config.seed,
-        "z_min_m": float(elevation.min()),
-        "z_max_m": float(elevation.max()),
+        "z_min_m": float(np.min(elevation)),
+        "z_max_m": float(np.max(elevation)),
     }
 
     return DEMData(
@@ -280,8 +280,8 @@ def _generate_conical(
         "num_pixels_x": nx,
         "num_pixels_y": ny,
         "seed": config.seed,
-        "z_min_m": float(elevation.min()),
-        "z_max_m": float(elevation.max()),
+        "z_min_m": float(np.min(elevation)),
+        "z_max_m": float(np.max(elevation)),
     }
 
     return DEMData(

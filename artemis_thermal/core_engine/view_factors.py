@@ -519,8 +519,8 @@ def compute_view_factor_matrix(
 
     rows = np.repeat(np.arange(num_faces), np.diff(row_ptr))
     row_sums = np.bincount(rows, weights=values_csr, minlength=num_faces)
-    if row_sums.size and row_sums.max() > 1.05:
-        logger.warning("Largest view-factor row sum is %.3f (> 1.05).", row_sums.max())
+    if row_sums.size and np.max(row_sums) > 1.05:
+        logger.warning("Largest view-factor row sum is %.3f (> 1.05).", np.max(row_sums))
 
     vf.reciprocity_error = reciprocity_error(row_ptr, col_idx_csr, values_csr, face_areas)
     if vf.reciprocity_error > reciprocity_tol:

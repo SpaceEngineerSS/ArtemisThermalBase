@@ -169,7 +169,7 @@ def dem_to_mesh(dem: DEMData, curvature_radius_m: float | None = None) -> Triang
         "resolution_m": dem.resolution_m,
         "degenerate_triangles": int(degenerate_count),
         "total_surface_area_km2": float(face_areas.sum()) / 1e6,
-        "z_range_m": float(vertices[:, 2].max() - vertices[:, 2].min()),
+        "z_range_m": float(np.max(vertices[:, 2]) - np.min(vertices[:, 2])),
         "memory_estimate_MB": (
             vertices.nbytes + triangles.nbytes + face_normals.nbytes
             + face_areas.nbytes + face_centroids.nbytes
