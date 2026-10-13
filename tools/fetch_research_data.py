@@ -24,7 +24,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from data_ingestion.provenance import sha256_file  # noqa: E402
+from artemis_thermal.data_ingestion.provenance import sha256_file  # noqa: E402
 
 ALLOWED_HOSTS = {"naif.jpl.nasa.gov", "planetarymaps.usgs.gov"}
 CHUNK = 1 << 20

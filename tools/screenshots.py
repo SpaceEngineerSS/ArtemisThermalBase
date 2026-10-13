@@ -26,8 +26,8 @@ def main() -> int:
 
     QCoreApplication.setOrganizationName("ArtemisThermalBase-screenshots")
     _app = QApplication.instance() or QApplication([])
-    from gui import theme
-    from gui.main_window import MainWindow
+    from artemis_thermal.gui import theme
+    from artemis_thermal.gui.main_window import MainWindow
 
     theme.load_fonts()
 

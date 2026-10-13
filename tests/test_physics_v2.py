@@ -19,7 +19,7 @@ class TestIRFluxComputation:
 
     def test_ir_flux_basic(self):
         """IR flux should be ε·σ·Σ(F_ij · T_j⁴)."""
-        from core_engine.view_factors import compute_ir_flux
+        from artemis_thermal.core_engine.view_factors import compute_ir_flux
 
         surface_temps = np.array([200.0, 250.0, 150.0])
         row_ptr = np.array([0, 1, 2, 3], dtype=np.int64)
@@ -38,7 +38,7 @@ class TestIRFluxComputation:
 
     def test_ir_flux_zero_temp(self):
         """Zero temperature → zero IR flux."""
-        from core_engine.view_factors import compute_ir_flux
+        from artemis_thermal.core_engine.view_factors import compute_ir_flux
 
         surface_temps = np.zeros(3)
         row_ptr = np.array([0, 1, 2, 3], dtype=np.int64)
@@ -61,35 +61,38 @@ class TestVolatileSublimation:
 
     def test_sublimation_zero_at_zero_temp(self):
         """No sublimation at absolute zero."""
-        from thermal_solver.volatiles import sublimation_rate
+        from artemis_thermal.thermal_solver.volatiles import sublimation_rate
 
         assert sublimation_rate(0.0) == 0.0
         assert sublimation_rate(0.5) == 0.0
 
     def test_sublimation_increases_with_temperature(self):
         """The flux rises monotonically with temperature."""
-        from thermal_solver.volatiles import sublimation_rate
+        from artemis_thermal.thermal_solver.volatiles import sublimation_rate
 
         rates = [sublimation_rate(T) for T in (60.0, 100.0, 150.0, 200.0, 250.0)]
         assert all(b > a for a, b in zip(rates, rates[1:], strict=False))
 
     def test_vapor_pressure_reference_values(self):
         """Murphy & Koop (2005) eq. 7: about 0.16 Pa at 200 K, 611 Pa at 273.16 K."""
-        from thermal_solver.volatiles import vapor_pressure_ice
+        from artemis_thermal.thermal_solver.volatiles import vapor_pressure_ice
 
         assert vapor_pressure_ice(273.16) == pytest.approx(611.7, rel=0.01)
         assert vapor_pressure_ice(200.0) == pytest.approx(0.1626, rel=0.02)
 
     def test_mass_flux_at_110K(self):
         """At 110 K the loss is ~4.5e-15 kg/m2/s: a few Gyr per metre of ice."""
-        from thermal_solver.volatiles import ice_retention_timescale, sublimation_rate
+        from artemis_thermal.thermal_solver.volatiles import (
+            ice_retention_timescale,
+            sublimation_rate,
+        )
 
         assert sublimation_rate(110.0) == pytest.approx(4.5e-15, rel=0.1)
         assert 1e9 < ice_retention_timescale(110.0) < 1e11
 
     def test_ice_is_lost_quickly_at_200K(self):
         """At 200 K a metre of exposed ice is gone within months."""
-        from thermal_solver.volatiles import ice_retention_timescale
+        from artemis_thermal.thermal_solver.volatiles import ice_retention_timescale
 
         assert ice_retention_timescale(200.0) < 1.0
 
@@ -104,7 +107,7 @@ class TestColdTrapStability:
 
     def test_stable_below_110K(self):
         """T < 110 K → stable (class 0)."""
-        from thermal_solver.volatiles import (
+        from artemis_thermal.thermal_solver.volatiles import (
             STABILITY_STABLE,
             ice_stability_class,
         )
@@ -115,7 +118,7 @@ class TestColdTrapStability:
 
     def test_marginal_110_to_115K(self):
         """110 K ≤ T < 115 K → marginal (class 1)."""
-        from thermal_solver.volatiles import (
+        from artemis_thermal.thermal_solver.volatiles import (
             STABILITY_MARGINAL,
             ice_stability_class,
         )
@@ -126,7 +129,7 @@ class TestColdTrapStability:
 
     def test_unstable_above_115K(self):
         """T ≥ 115 K → unstable (class 2)."""
-        from thermal_solver.volatiles import (
+        from artemis_thermal.thermal_solver.volatiles import (
             STABILITY_UNSTABLE,
             ice_stability_class,
         )
@@ -137,7 +140,7 @@ class TestColdTrapStability:
 
     def test_cold_trap_map_vectorized(self):
         """Vectorized cold trap map should match element-wise classification."""
-        from thermal_solver.volatiles import (
+        from artemis_thermal.thermal_solver.volatiles import (
             compute_cold_trap_map,
             ice_stability_class,
         )

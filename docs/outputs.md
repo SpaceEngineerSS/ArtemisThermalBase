@@ -59,7 +59,7 @@ if y[-1] > y[0]:          # make row 0 the northern (top) row
 print(grid.shape, float(grid.min()), float(grid.max()))
 ```
 
-Inside Python, `simulation.io_manager.ResultsBundle` does this for you and
+Inside Python, `artemis_thermal.simulation.io_manager.ResultsBundle` does this for you and
 memory-maps the arrays; see [API](api.md).
 
 ## Coordinates

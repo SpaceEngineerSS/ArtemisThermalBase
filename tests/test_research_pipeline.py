@@ -5,9 +5,9 @@ import json
 import numpy as np
 import pytest
 
-from data_ingestion.lola_loader import LOLALoader
-from data_ingestion.provenance import verify_provenance, write_provenance
-from validation.diviner import temperature_metrics
+from artemis_thermal.data_ingestion.lola_loader import LOLALoader
+from artemis_thermal.data_ingestion.provenance import verify_provenance, write_provenance
+from artemis_thermal.validation.diviner import temperature_metrics
 
 
 def test_provenance_detects_file_change(tmp_path) -> None:

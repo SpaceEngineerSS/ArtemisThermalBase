@@ -95,7 +95,7 @@ recorded period. It also uses 64 disk samples, terrain infrared with 512 rays
 per facet and 2-minute steps, so expect hours on a workstation, not minutes.
 
 ```bash
-python -m validation.check_research_readiness --dem data/processed/shackleton_lola_200m.tif
+python -m artemis_thermal.validation.check_research_readiness --dem data/processed/shackleton_lola_200m.tif
 artemis run --config research_shackleton \
     --dem data/processed/shackleton_lola_200m.tif --output output/research
 ```

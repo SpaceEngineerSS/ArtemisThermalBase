@@ -77,7 +77,7 @@ for real ephemerides. Details in the [changelog](CHANGELOG.md).
 python -m pip install -e ".[dev]"
 python -m pytest
 python -m ruff check .
-python -m mypy -p core_engine -p simulation -p gui
+python -m mypy -p artemis_thermal
 python tools/build_docs.py --serve   # the documentation site on localhost:8000
 ```
 

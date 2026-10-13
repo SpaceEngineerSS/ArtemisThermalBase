@@ -34,7 +34,7 @@ brightness temperatures over the poles for more than a decade, and it is the
 obvious reference. A fair comparison needs the instrument's footprint, local
 time and emission angle for each observation, and the channel-to-bolometric
 conversion; that work is open. The function that computes bias and RMSE while
-ignoring Diviner's missing-data values (`validation/diviner.py`) exists and is
+ignoring Diviner's missing-data values (`artemis_thermal/validation/diviner.py`) exists and is
 tested, the rest does not.
 
 Until it is done, treat absolute temperatures as model output with the

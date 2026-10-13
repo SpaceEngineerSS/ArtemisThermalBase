@@ -20,7 +20,7 @@ minute. GUI tests run offscreen (`QT_QPA_PLATFORM=offscreen`).
 ## Before you open a pull request
 
 - `python -m pytest`, `python -m ruff check .` and
-  `python -m mypy -p core_engine -p data_ingestion -p simulation -p thermal_solver -p gui`
+  `python -m mypy -p artemis_thermal`
   pass.
 - A change that alters results comes with a test that would have caught the
   old behaviour, and a line in `CHANGELOG.md` saying what changes and by how

@@ -20,7 +20,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from data_ingestion.provenance import sha256_file, write_provenance
+from artemis_thermal.data_ingestion.provenance import sha256_file, write_provenance
 
 DEFAULT_SOURCE = (
     "https://planetarymaps.usgs.gov/mosaic/"

@@ -39,14 +39,17 @@ def _peak_mb() -> float:
 
 def bench_case(resolution_m: float, steps: int = 288) -> dict[str, float]:
     """Time BVH build, shadows and conduction for one grid resolution."""
-    from core_engine.constants import load_config
-    from core_engine.frames import enu_frame, synthetic_sun_body
-    from core_engine.illumination import IlluminationEngine
-    from core_engine.mesh import dem_to_mesh
-    from data_ingestion.ephemeris import SyntheticSun
-    from data_ingestion.synthetic_dem import generate_synthetic_dem
-    from simulation.runner import SimulationRunner
-    from thermal_solver.crank_nicolson import CrankNicolsonSolver, create_thermal_column
+    from artemis_thermal.core_engine.constants import load_config
+    from artemis_thermal.core_engine.frames import enu_frame, synthetic_sun_body
+    from artemis_thermal.core_engine.illumination import IlluminationEngine
+    from artemis_thermal.core_engine.mesh import dem_to_mesh
+    from artemis_thermal.data_ingestion.ephemeris import SyntheticSun
+    from artemis_thermal.data_ingestion.synthetic_dem import generate_synthetic_dem
+    from artemis_thermal.simulation.runner import SimulationRunner
+    from artemis_thermal.thermal_solver.crank_nicolson import (
+        CrankNicolsonSolver,
+        create_thermal_column,
+    )
 
     cfg = load_config()
     cfg = replace(cfg, synthetic_dem=replace(cfg.synthetic_dem, grid_resolution_m=resolution_m))

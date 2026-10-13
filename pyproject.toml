@@ -62,10 +62,10 @@ dev = [
 ]
 
 [project.scripts]
-artemis = "simulation.cli:main"
+artemis = "artemis_thermal.simulation.cli:main"
 
 [project.gui-scripts]
-artemis-ui = "gui.app:main"
+artemis-ui = "artemis_thermal.gui.app:main"
 
 [project.urls]
 Homepage = "https://spaceengineerss.github.io/ArtemisThermalBase/"
@@ -78,16 +78,7 @@ Changelog = "https://github.com/SpaceEngineerSS/ArtemisThermalBase/blob/main/CHA
 path = "artemis_thermal/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = [
-    "artemis_thermal",
-    "core_engine",
-    "data_ingestion",
-    "gui",
-    "simulation",
-    "thermal_solver",
-    "validation",
-    "visualization",
-]
+packages = ["artemis_thermal"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "config/default_config.yaml" = "artemis_thermal/config/default_config.yaml"
@@ -107,8 +98,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["artemis_thermal", "core_engine", "data_ingestion", "simulation",
-          "thermal_solver", "validation", "visualization", "gui"]
+source = ["artemis_thermal"]
 
 [tool.ruff]
 target-version = "py311"
@@ -126,7 +116,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D101", "D102", "S603", "S607"]
 "tools/**" = ["S310"]
-"gui/theme.py" = ["E501"]
+"artemis_thermal/gui/theme.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

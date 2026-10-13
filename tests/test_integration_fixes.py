@@ -8,15 +8,15 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from core_engine.constants import load_config
-from core_engine.illumination import IlluminationEngine
-from core_engine.mesh import dem_to_mesh
-from core_engine.view_factors import compute_view_factor_matrix
-from data_ingestion.synthetic_dem import generate_synthetic_dem
-from simulation.cli import main as installed_main
-from simulation.io_manager import ResultsBundle, ResultsError
-from simulation.runner import SimulationRunner
-from thermal_solver.crank_nicolson import CrankNicolsonSolver, create_thermal_column
+from artemis_thermal.core_engine.constants import load_config
+from artemis_thermal.core_engine.illumination import IlluminationEngine
+from artemis_thermal.core_engine.mesh import dem_to_mesh
+from artemis_thermal.core_engine.view_factors import compute_view_factor_matrix
+from artemis_thermal.data_ingestion.synthetic_dem import generate_synthetic_dem
+from artemis_thermal.simulation.cli import main as installed_main
+from artemis_thermal.simulation.io_manager import ResultsBundle, ResultsError
+from artemis_thermal.simulation.runner import SimulationRunner
+from artemis_thermal.thermal_solver.crank_nicolson import CrankNicolsonSolver, create_thermal_column
 
 
 @pytest.fixture(scope="module")
@@ -246,8 +246,8 @@ def test_runner_uses_dense_state_pipeline(config) -> None:
 
 
 def test_runner_rotates_ephemeris_sun_into_the_mesh_frame(config, monkeypatch) -> None:
-    from core_engine.frames import surface_normal
-    from data_ingestion.ephemeris import SunState
+    from artemis_thermal.core_engine.frames import surface_normal
+    from artemis_thermal.data_ingestion.ephemeris import SunState
 
     calls: list[float] = []
 
@@ -259,7 +259,7 @@ def test_runner_rotates_ephemeris_sun_into_the_mesh_frame(config, monkeypatch) -
             calls.append(solar_constant)
             return SunState(surface_normal(-88.0, 45.0), 1.5e11, 1400.0)
 
-    import data_ingestion.ephemeris as ephemeris_module
+    import artemis_thermal.data_ingestion.ephemeris as ephemeris_module
 
     monkeypatch.setattr(ephemeris_module, "SolarEphemeris", OverheadSun)
     run_config = replace(
@@ -282,3 +282,26 @@ def test_runner_rotates_ephemeris_sun_into_the_mesh_frame(config, monkeypatch) -
     assert result.metadata["frame"]["latitude_deg"] == pytest.approx(-88.0)
     assert result.sun_elevations[0] == pytest.approx(90.0, abs=1e-6)
     assert np.all(result.final_illumination == 1.0)
+
+
+def test_view_factors_on_a_bowl_are_physical(config) -> None:
+    dem_cfg = replace(config.synthetic_dem, radius_m=1500.0, depth_m=1200.0,
+                      rim_height_m=0.0, grid_resolution_m=150.0, domain_padding_m=300.0)
+    mesh = dem_to_mesh(generate_synthetic_dem(dem_cfg))
+    engine = IlluminationEngine(mesh, point_source_mode=True)
+    nodes, tri_verts, ordered = engine.get_bvh_data()
+    vf = compute_view_factor_matrix(
+        mesh.face_centroids, mesh.face_normals, mesh.face_areas, nodes, tri_verts, ordered,
+        mesh.triangles, num_rays=256, max_neighbors=256, max_memory_mb=512.0,
+    )
+    rows = np.repeat(np.arange(vf.num_faces), np.diff(vf.row_ptr))
+    row_sums = np.bincount(rows, weights=vf.values, minlength=vf.num_faces)
+    assert np.all(row_sums <= 1.0 + 1e-12)
+    floor = int(np.argmin(mesh.face_centroids[:, 2]))
+    rim = int(np.argmax(mesh.face_centroids[:, 2]))
+    # From the floor centre the rim stands atan(1200/1500) = 38.7 deg high; a
+    # cosine-weighted hemisphere puts sin^2(38.7 deg) = 0.39 of its rays below
+    # that. The parabolic wall curves inward, so the floor sees a bit less.
+    assert 0.25 < row_sums[floor] < 0.45
+    assert row_sums[rim] < row_sums[floor]
+    assert np.all(vf.col_idx != rows)

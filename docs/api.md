@@ -16,8 +16,8 @@ written.
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from core_engine.constants import load_config
-from simulation.runner import SimulationRunner
+from artemis_thermal.core_engine.constants import load_config
+from artemis_thermal.simulation.runner import SimulationRunner
 
 config = load_config()                       # or load_config("shackleton_preview")
 config = replace(config, synthetic_dem=replace(config.synthetic_dem,
@@ -61,9 +61,9 @@ It returns `SimulationResults`: per-facet arrays `final_surface_T`,
 ## Check the cost first
 
 ```python
-from core_engine.constants import load_config
-from data_ingestion.synthetic_dem import synthetic_grid_shape
-from simulation.runner import estimate_run_memory_mb, faces_for_dem_shape
+from artemis_thermal.core_engine.constants import load_config
+from artemis_thermal.data_ingestion.synthetic_dem import synthetic_grid_shape
+from artemis_thermal.simulation.runner import estimate_run_memory_mb, faces_for_dem_shape
 
 config = load_config()
 faces = faces_for_dem_shape(*synthetic_grid_shape(config.synthetic_dem))
@@ -74,7 +74,7 @@ print(faces, round(estimate["total"]), "MB")
 ## Read a run folder
 
 ```python
-from simulation.io_manager import ResultsBundle
+from artemis_thermal.simulation.io_manager import ResultsBundle
 
 run = ResultsBundle.open("output/api_example")
 grid = run.raster("surface_T_max")           # north-up (rows, cols) float32
@@ -92,8 +92,8 @@ memory-mapped and only read when used.
 ## Figures
 
 ```python
-from simulation.io_manager import ResultsBundle
-from visualization.figures import render_run_figures
+from artemis_thermal.simulation.io_manager import ResultsBundle
+from artemis_thermal.visualization.figures import render_run_figures
 
 paths = render_run_figures(ResultsBundle.open("output/api_example"), "output/api_example",
                            dpi=120, hero_dpi=120)
@@ -101,22 +101,22 @@ print([p.name for p in paths])
 ```
 
 The colour maps and palette live in `artemis_thermal.style`;
-`visualization.figures.colormap("temperature")` returns the Matplotlib map
+`artemis_thermal.visualization.figures.colormap("temperature")` returns the Matplotlib map
 used everywhere.
 
 ## Lower-level pieces
 
 | module | what you get |
 |---|---|
-| `core_engine.frames` | `body_to_enu`, `projected_frame`, `frame_for_dem`, `curvature_drop` |
-| `core_engine.mesh` | `dem_to_mesh(dem, curvature_radius_m)` → `TriangleMesh` |
-| `core_engine.illumination` | `IlluminationEngine(mesh, ...).compute(sun_dir)` → visible fraction and projected factor |
-| `core_engine.raytracer` | `build_bvh`, the shadow kernels, `moller_trumbore` |
-| `data_ingestion.ephemeris` | `SyntheticSun`, `SolarEphemeris` (Skyfield), `iau_moon_rotation` |
-| `data_ingestion.spice_ephemeris` | `SpiceSolarEphemeris` |
-| `data_ingestion.lola_loader` | `LOLALoader().load_dem(path, max_size=...)` |
-| `thermal_solver.crank_nicolson` | `CrankNicolsonSolver.step_batch` on a dense `(faces, nodes)` array |
-| `thermal_solver.volatiles` | `sublimation_rate`, `ice_retention_timescale`, `compute_cold_trap_map` |
+| `artemis_thermal.core_engine.frames` | `body_to_enu`, `projected_frame`, `frame_for_dem`, `curvature_drop` |
+| `artemis_thermal.core_engine.mesh` | `dem_to_mesh(dem, curvature_radius_m)` → `TriangleMesh` |
+| `artemis_thermal.core_engine.illumination` | `IlluminationEngine(mesh, ...).compute(sun_dir)` → visible fraction and projected factor |
+| `artemis_thermal.core_engine.raytracer` | `build_bvh`, the shadow kernels, `moller_trumbore` |
+| `artemis_thermal.data_ingestion.ephemeris` | `SyntheticSun`, `SolarEphemeris` (Skyfield), `iau_moon_rotation` |
+| `artemis_thermal.data_ingestion.spice_ephemeris` | `SpiceSolarEphemeris` |
+| `artemis_thermal.data_ingestion.lola_loader` | `LOLALoader().load_dem(path, max_size=...)` |
+| `artemis_thermal.thermal_solver.crank_nicolson` | `CrankNicolsonSolver.step_batch` on a dense `(faces, nodes)` array |
+| `artemis_thermal.thermal_solver.volatiles` | `sublimation_rate`, `ice_retention_timescale`, `compute_cold_trap_map` |
 
 A Sun source is anything with
 `sun_state(utc_time, solar_constant) -> SunState`, where `SunState` carries a

@@ -281,8 +281,8 @@ lunar day and can miss the hottest hours; classify from at least one full day.
 - Wald, I. (2007). On fast construction of SAH-based bounding volume hierarchies. *Proc. IEEE Symp. Interactive Ray Tracing*, 33–40.
 - Zhang, J. A., & Paige, D. A. (2009). Cold-trapped organic compounds at the poles of the Moon and Mercury. *GRL* 36, L16203.
 
-The code for each section: [frames](../core_engine/frames.py),
-[ephemeris](../data_ingestion/ephemeris.py), [ray tracer](../core_engine/raytracer.py),
-[solar disk](../core_engine/solar_disk.py), [Hapke](../core_engine/reflectance.py),
-[view factors](../core_engine/view_factors.py), [roughness](../core_engine/roughness.py),
-[conduction](../thermal_solver/crank_nicolson.py), [volatiles](../thermal_solver/volatiles.py).
+The code for each section: [frames](../artemis_thermal/core_engine/frames.py),
+[ephemeris](../artemis_thermal/data_ingestion/ephemeris.py), [ray tracer](../artemis_thermal/core_engine/raytracer.py),
+[solar disk](../artemis_thermal/core_engine/solar_disk.py), [Hapke](../artemis_thermal/core_engine/reflectance.py),
+[view factors](../artemis_thermal/core_engine/view_factors.py), [roughness](../artemis_thermal/core_engine/roughness.py),
+[conduction](../artemis_thermal/thermal_solver/crank_nicolson.py), [volatiles](../artemis_thermal/thermal_solver/volatiles.py).

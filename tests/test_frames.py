@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from core_engine.frames import (
+from artemis_thermal.core_engine.frames import (
     body_to_enu,
     curvature_drop,
     enu_frame,
@@ -17,11 +17,11 @@ from core_engine.frames import (
     surface_normal,
     synthetic_sun_body,
 )
-from data_ingestion import polar_stereographic as ps
+from artemis_thermal.data_ingestion import polar_stereographic as ps
 
 ROOT = Path(__file__).resolve().parents[1]
 KERNELS = ROOT / "data" / "ephemeris"
-SMOKE = ROOT / "validation" / "reference" / "naif_de440_smoke.json"
+SMOKE = ROOT / "artemis_thermal" / "validation" / "reference" / "naif_de440_smoke.json"
 KERNEL_FILES = [
     "naif0012.tls",
     "de440s.bsp",
@@ -67,7 +67,7 @@ def test_projected_frame_is_right_handed_with_up_on_z() -> None:
 
 def test_projected_frame_agrees_with_rasterio_crs() -> None:
     rasterio = pytest.importorskip("rasterio")
-    from core_engine.frames import rasterio_inverse
+    from artemis_thermal.core_engine.frames import rasterio_inverse
 
     crs = rasterio.crs.CRS.from_proj4(
         "+proj=stere +lat_0=-90 +lat_ts=-90 +lon_0=0 +a=1737400 +b=1737400 +units=m +no_defs"
@@ -111,7 +111,7 @@ def _spice_or_skip():
 
 def test_iau_rotation_tracks_spice_moon_me() -> None:
     spice = _spice_or_skip()
-    from data_ingestion.ephemeris import iau_moon_rotation
+    from artemis_thermal.data_ingestion.ephemeris import iau_moon_rotation
 
     for name in KERNEL_FILES:
         spice.furnsh(str(KERNELS / name))
@@ -124,7 +124,7 @@ def test_iau_rotation_tracks_spice_moon_me() -> None:
 
 def test_spice_sun_elevation_matches_reference_fixture() -> None:
     _spice_or_skip()
-    from data_ingestion.spice_ephemeris import SpiceSolarEphemeris
+    from artemis_thermal.data_ingestion.spice_ephemeris import SpiceSolarEphemeris
 
     ref = json.loads(SMOKE.read_text(encoding="utf-8"))
     eph = SpiceSolarEphemeris([KERNELS / name for name in KERNEL_FILES])

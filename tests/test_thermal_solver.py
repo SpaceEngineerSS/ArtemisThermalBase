@@ -19,11 +19,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core_engine.constants import (
+from artemis_thermal.core_engine.constants import (
     SimulationConfig,
     load_config,
 )
-from thermal_solver.crank_nicolson import (
+from artemis_thermal.thermal_solver.crank_nicolson import (
     CrankNicolsonSolver,
     ThermalColumn,
     _thomas_solve,

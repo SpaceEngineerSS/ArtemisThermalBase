@@ -14,13 +14,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core_engine.mesh import TriangleMesh
-from core_engine.solar_disk import (
+from artemis_thermal.core_engine.mesh import TriangleMesh
+from artemis_thermal.core_engine.solar_disk import (
     compute_solar_solid_angle,
     generate_solar_disk_samples,
     validate_sample_weights,
 )
-from data_ingestion.polar_stereographic import (
+from artemis_thermal.data_ingestion.polar_stereographic import (
     forward,
     forward_batch,
     get_shackleton_center,
@@ -259,8 +259,8 @@ class TestIlluminationEngine:
     @pytest.fixture
     def flat_mesh(self) -> TriangleMesh:
         """Create a small flat mesh for testing."""
-        from core_engine.mesh import dem_to_mesh
-        from data_ingestion.synthetic_dem import DEMData
+        from artemis_thermal.core_engine.mesh import dem_to_mesh
+        from artemis_thermal.data_ingestion.synthetic_dem import DEMData
 
         res = 50.0
         n = 21
@@ -275,7 +275,7 @@ class TestIlluminationEngine:
 
     def test_point_source_binary(self, flat_mesh: TriangleMesh) -> None:
         """Point-source mode should produce binary 0/1 illumination."""
-        from core_engine.illumination import IlluminationEngine
+        from artemis_thermal.core_engine.illumination import IlluminationEngine
 
         engine = IlluminationEngine(
             flat_mesh, point_source_mode=True, num_samples=1,
@@ -292,7 +292,7 @@ class TestIlluminationEngine:
 
     def test_overhead_sun_full_illumination(self, flat_mesh: TriangleMesh) -> None:
         """Flat terrain with overhead sun → 100% illumination."""
-        from core_engine.illumination import IlluminationEngine
+        from artemis_thermal.core_engine.illumination import IlluminationEngine
 
         engine = IlluminationEngine(flat_mesh, point_source_mode=True)
 
@@ -304,7 +304,7 @@ class TestIlluminationEngine:
 
     def test_below_horizon_all_shadow(self, flat_mesh: TriangleMesh) -> None:
         """Sun below horizon → all faces shadowed."""
-        from core_engine.illumination import IlluminationEngine
+        from artemis_thermal.core_engine.illumination import IlluminationEngine
 
         engine = IlluminationEngine(flat_mesh, point_source_mode=True)
 
@@ -321,9 +321,9 @@ class TestIlluminationEngine:
         For a parabolic bowl, the shadow boundary region should have
         more penumbra faces in extended mode than in point mode.
         """
-        from core_engine.illumination import IlluminationEngine
-        from core_engine.mesh import dem_to_mesh
-        from data_ingestion.synthetic_dem import DEMData
+        from artemis_thermal.core_engine.illumination import IlluminationEngine
+        from artemis_thermal.core_engine.mesh import dem_to_mesh
+        from artemis_thermal.data_ingestion.synthetic_dem import DEMData
 
         # Small bowl
         R, D = 500.0, 100.0

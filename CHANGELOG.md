@@ -17,7 +17,7 @@ rose and set like at the equator. Re-run anything you made with 0.4.
   is. The local frame was north/east/up, which is left-handed and mirrors every
   azimuth, and the Sun vector was never rotated from local east/north into the
   DEM's grid axes. All Sun sources now return a body-frame vector and one
-  module (`core_engine/frames.py`) rotates it onto the mesh, using the DEM's own
+  module (`artemis_thermal/core_engine/frames.py`) rotates it onto the mesh, using the DEM's own
   CRS. The IAU 2015 lunar orientation, now with its thirteen periodic terms,
   agrees with SPICE `MOON_ME` to better than 0.003°.
 - **Polar stereographic convention.** `polar_stereographic.py` used
@@ -77,11 +77,16 @@ difference map. Light and dark themes, bundled fonts, no network access.
 
 ### Command line and files
 
+- **One package.** Everything now lives under `artemis_thermal`
+  (`artemis_thermal.simulation.runner`, `artemis_thermal.core_engine.frames`,
+  …). 0.4 installed seven top-level packages with names such as `gui`,
+  `simulation` and `validation` that would collide with other projects.
+  Update imports by prefixing `artemis_thermal.`.
 - `artemis` has subcommands: `run` (the default), `ui`, `render`, `configs`,
   `warmup`. It works from any directory; bundled configurations are found by
   name (`--config research_shackleton`).
 - New run-folder format (version 2, documented in [Outputs](docs/outputs.md)),
-  read lazily by `simulation.io_manager.ResultsBundle`. Folders written by 0.4
+  read lazily by `artemis_thermal.simulation.io_manager.ResultsBundle`. Folders written by 0.4
   are recognised and the app asks for a re-run.
 - New configuration `shackleton_preview`: real LOLA terrain and SPICE Sun at
   laptop cost.
@@ -94,7 +99,7 @@ difference map. Light and dark themes, bundled fonts, no network access.
 
 ### Removed
 
-The Streamlit dashboard, `thermal_solver/regolith_properties.py` (unused, and
+The Streamlit dashboard, `artemis_thermal/thermal_solver/regolith_properties.py` (unused, and
 a copy of the solver's own property functions), `tools/download_sample_data.py`
 (downloaded a shaded-relief image and treated it as elevation), unused
 ray-tracer and ephemeris helpers, unused configuration keys, and tests that did

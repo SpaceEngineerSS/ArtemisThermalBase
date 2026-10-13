@@ -14,8 +14,8 @@ pytest.importorskip("pyqtgraph")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["ARTEMIS_REDUCE_MOTION"] = "1"
 
-from core_engine.constants import load_config  # noqa: E402
-from simulation.runner import SimulationRunner  # noqa: E402
+from artemis_thermal.core_engine.constants import load_config  # noqa: E402
+from artemis_thermal.simulation.runner import SimulationRunner  # noqa: E402
 
 pytestmark = pytest.mark.gui
 
@@ -65,7 +65,7 @@ def _wait(predicate, timeout_ms: int = 20000) -> bool:
 
 def test_layers_and_summary(run_folder) -> None:
     from artemis_thermal import style
-    from gui import run_data
+    from artemis_thermal.gui import run_data
 
     bundle = run_data.open_bundle(str(run_folder))
     for key, _title in run_data.LAYER_KEYS:
@@ -78,7 +78,7 @@ def test_layers_and_summary(run_folder) -> None:
 
 
 def test_site_report_is_physical(run_folder) -> None:
-    from gui import run_data
+    from artemis_thermal.gui import run_data
 
     bundle = run_data.open_bundle(str(run_folder))
     report = run_data.site_report(bundle, 0.0, 0.0)  # crater floor
@@ -90,7 +90,7 @@ def test_site_report_is_physical(run_folder) -> None:
 
 
 def test_window_opens_run_and_inspects_a_site(qapp, run_folder) -> None:
-    from gui.main_window import MainWindow
+    from artemis_thermal.gui.main_window import MainWindow
 
     window = MainWindow(dark=False)
     window.show()
@@ -106,7 +106,7 @@ def test_window_opens_run_and_inspects_a_site(qapp, run_folder) -> None:
 
 
 def test_worker_process_runs_and_reports(qapp, tmp_path) -> None:
-    from gui.worker import RunController, RunRequest
+    from artemis_thermal.gui.worker import RunController, RunRequest
 
     controller = RunController()
     events: dict[str, object] = {}

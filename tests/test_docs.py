@@ -62,8 +62,9 @@ def test_site_builds_without_broken_links() -> None:
 def test_cli_runs_from_any_directory(tmp_path) -> None:
     env = dict(os.environ, PYTHONPATH=str(ROOT))
     result = subprocess.run(
-        [sys.executable, "-m", "simulation.cli", "run", "--duration", "1", "--dt", "900",
-         "--cratersize", "1500", "--point-source", "--no-figures", "--output", "smoke"],
+        [sys.executable, "-m", "artemis_thermal.simulation.cli", "run", "--duration", "1",
+         "--dt", "900", "--cratersize", "1500", "--point-source", "--no-figures",
+         "--output", "smoke"],
         capture_output=True, text=True, cwd=tmp_path, env=env, check=False, timeout=600,
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
@@ -73,7 +74,7 @@ def test_cli_runs_from_any_directory(tmp_path) -> None:
 def test_cli_rejects_bad_arguments(tmp_path) -> None:
     env = dict(os.environ, PYTHONPATH=str(ROOT))
     result = subprocess.run(
-        [sys.executable, "-m", "simulation.cli", "run", "--dt", "-5"],
+        [sys.executable, "-m", "artemis_thermal.simulation.cli", "run", "--dt", "-5"],
         capture_output=True, text=True, cwd=tmp_path, env=env, check=False,
     )
     assert result.returncode != 0

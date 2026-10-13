@@ -71,7 +71,7 @@ the kernels, and the SHA-256 of every output file.
 Before an expensive research run:
 
 ```bash
-python -m validation.check_research_readiness --dem data/processed/shackleton_lola_200m.tif
+python -m artemis_thermal.validation.check_research_readiness --dem data/processed/shackleton_lola_200m.tif
 ```
 
 It loads the research configuration, verifies the DEM's provenance and

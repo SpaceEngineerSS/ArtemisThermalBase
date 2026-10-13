@@ -5,7 +5,7 @@ Installed copies provide the same thing as the ``artemis`` command.
 
 import sys
 
-from simulation.cli import main
+from artemis_thermal.simulation.cli import main
 
 if __name__ == "__main__":
     sys.exit(main())

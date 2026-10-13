@@ -11,14 +11,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core_engine.mesh import dem_to_mesh
-from core_engine.raytracer import (
+from artemis_thermal.core_engine.mesh import dem_to_mesh
+from artemis_thermal.core_engine.raytracer import (
     build_bvh,
     compute_shadow_map_point_source,
     moller_trumbore,
     ray_aabb_intersect,
 )
-from data_ingestion.synthetic_dem import DEMData
+from artemis_thermal.data_ingestion.synthetic_dem import DEMData
 
 # ===================================================================
 # FIXTURES

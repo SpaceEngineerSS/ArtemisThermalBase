@@ -235,7 +235,7 @@ def geometry() -> str:
 
 def column() -> str:
     """The 1-D column under every facet: grid, properties, boundary conditions."""
-    from core_engine.constants import load_config
+    from artemis_thermal.core_engine.constants import load_config
 
     cfg = load_config()
     z = cfg.solver.grid.build_grid()
@@ -308,8 +308,8 @@ def diagrams() -> None:
 
 def run_figures(folder: str) -> None:
     """Render a run's report figures into docs/img/run/."""
-    from simulation.io_manager import ResultsBundle
-    from visualization.figures import render_run_figures
+    from artemis_thermal.simulation.io_manager import ResultsBundle
+    from artemis_thermal.visualization.figures import render_run_figures
 
     out = IMG / "run"
     out.mkdir(parents=True, exist_ok=True)
@@ -325,7 +325,7 @@ def bench_chart(results_file: str) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from visualization.figures import _setup
+    from artemis_thermal.visualization.figures import _setup
 
     pal = _setup()
     rows = json.loads(Path(results_file).read_text(encoding="utf-8"))["cases"]
